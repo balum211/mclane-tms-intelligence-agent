@@ -1,0 +1,25 @@
+# Generated data (rebuild with: python -m tms_data.generate && python -m tms_data.load --target duckdb)
+data/generated/
+data/*.duckdb
+data/*.duckdb.wal
+data/decision_log.jsonl
+
+# Secrets and local config
+.env
+tms_agent/.env
+*.json.key
+service-account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+build/
+dist/
+
+# ADK / tooling
+.adk/
+.DS_Store
