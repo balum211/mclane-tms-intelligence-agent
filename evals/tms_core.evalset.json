@@ -1,0 +1,427 @@
+{
+  "eval_set_id": "tms_core",
+  "name": "TMS Intelligence core questions",
+  "eval_cases": [
+    {
+      "eval_id": "morning_brief",
+      "conversation": [
+        {
+          "invocation_id": "morning_brief-1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "Give me this morning's TMS brief."
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Leads with network KPIs vs prior week (on-time %, margin %, cost per mile) and lists open critical/high exceptions."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "args": {},
+                "name": "get_ops_kpi_snapshot"
+              }
+            ],
+            "tool_responses": [],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 0.0
+        }
+      ],
+      "session_input": {
+        "app_name": "tms_agent",
+        "user_id": "eval_user",
+        "state": {}
+      },
+      "creation_timestamp": 0.0,
+      "final_session_state": {}
+    },
+    {
+      "eval_id": "worst_carrier",
+      "conversation": [
+        {
+          "invocation_id": "worst_carrier-1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "Which carrier is hurting our on-time performance the most in the last 90 days?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Names Redline Freight Brokers (CR006) with its on-time % versus the private fleet, and mentions low tender acceptance or the conditional safety rating."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "args": {},
+                "name": "carrier_performance_analyst"
+              }
+            ],
+            "tool_responses": [],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 0.0
+        }
+      ],
+      "session_input": {
+        "app_name": "tms_agent",
+        "user_id": "eval_user",
+        "state": {}
+      },
+      "creation_timestamp": 0.0,
+      "final_session_state": {}
+    },
+    {
+      "eval_id": "invoice_overbilling",
+      "conversation": [
+        {
+          "invocation_id": "invoice_overbilling-1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "How much are carriers overbilling us and which carriers are the worst?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Reports overbilled dollars and annualized savings, names Redline Freight Brokers as the largest source, and lists the main finding types."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "args": {},
+                "name": "freight_audit_analyst"
+              }
+            ],
+            "tool_responses": [],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 0.0
+        }
+      ],
+      "session_input": {
+        "app_name": "tms_agent",
+        "user_id": "eval_user",
+        "state": {}
+      },
+      "creation_timestamp": 0.0,
+      "final_session_state": {}
+    },
+    {
+      "eval_id": "contract_rate_lanes",
+      "conversation": [
+        {
+          "invocation_id": "contract_rate_lanes-1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "Which lanes exceeded contract rate last month and why?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Lists lanes with RATE_ABOVE_CONTRACT or MILES_INFLATED findings and explains billed versus contract rate."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "args": {},
+                "name": "freight_audit_analyst"
+              }
+            ],
+            "tool_responses": [],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 0.0
+        }
+      ],
+      "session_input": {
+        "app_name": "tms_agent",
+        "user_id": "eval_user",
+        "state": {}
+      },
+      "creation_timestamp": 0.0,
+      "final_session_state": {}
+    },
+    {
+      "eval_id": "accessorial_leakage",
+      "conversation": [
+        {
+          "invocation_id": "accessorial_leakage-1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "Where are we leaving accessorial revenue on the table?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Names BurgerBarn with unbilled detention, gives the recoverable and annualized amounts and recommends detention billing automation."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "args": {},
+                "name": "freight_cost_analyst"
+              }
+            ],
+            "tool_responses": [],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 0.0
+        }
+      ],
+      "session_input": {
+        "app_name": "tms_agent",
+        "user_id": "eval_user",
+        "state": {}
+      },
+      "creation_timestamp": 0.0,
+      "final_session_state": {}
+    },
+    {
+      "eval_id": "unprofitable_lane",
+      "conversation": [
+        {
+          "invocation_id": "unprofitable_lane-1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "What is our least profitable lane and why?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Identifies DC05->NV with negative margin and explains high empty miles (deadhead) as the driver."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "args": {},
+                "name": "freight_cost_analyst"
+              }
+            ],
+            "tool_responses": [],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 0.0
+        }
+      ],
+      "session_input": {
+        "app_name": "tms_agent",
+        "user_id": "eval_user",
+        "state": {}
+      },
+      "creation_timestamp": 0.0,
+      "final_session_state": {}
+    },
+    {
+      "eval_id": "tomorrow_risk",
+      "conversation": [
+        {
+          "invocation_id": "tomorrow_risk-1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "Which loads departing in the next 24 hours are likely to be late?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Lists loads with late probability, confidence, risk drivers and a mitigation for each."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "args": {},
+                "name": "service_exceptions_analyst"
+              }
+            ],
+            "tool_responses": [],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 0.0
+        }
+      ],
+      "session_input": {
+        "app_name": "tms_agent",
+        "user_id": "eval_user",
+        "state": {}
+      },
+      "creation_timestamp": 0.0,
+      "final_session_state": {}
+    },
+    {
+      "eval_id": "dc03_mondays",
+      "conversation": [
+        {
+          "invocation_id": "dc03_mondays-1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "Why is DC03 late on Mondays?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Shows DC03 Monday on-time well below other days and attributes it to late dispatch."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "args": {},
+                "name": "service_exceptions_analyst"
+              }
+            ],
+            "tool_responses": [],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 0.0
+        }
+      ],
+      "session_input": {
+        "app_name": "tms_agent",
+        "user_id": "eval_user",
+        "state": {}
+      },
+      "creation_timestamp": 0.0,
+      "final_session_state": {}
+    },
+    {
+      "eval_id": "reefer",
+      "conversation": [
+        {
+          "invocation_id": "reefer-1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "Are reefer temperature excursions related to equipment age?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Shows excursion rate for 9+ year refrigeration units is many times higher and recommends replacing / repairing the worst trailers."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "args": {},
+                "name": "service_exceptions_analyst"
+              }
+            ],
+            "tool_responses": [],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 0.0
+        }
+      ],
+      "session_input": {
+        "app_name": "tms_agent",
+        "user_id": "eval_user",
+        "state": {}
+      },
+      "creation_timestamp": 0.0,
+      "final_session_state": {}
+    },
+    {
+      "eval_id": "adhoc_sql",
+      "conversation": [
+        {
+          "invocation_id": "adhoc_sql-1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "How many stops did we deliver to TacoTrail restaurants last week and what was the average dwell time?"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Gives a stop count and an average dwell in minutes and shows the SQL it ran."
+              }
+            ],
+            "role": "model"
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "args": {},
+                "name": "tms_data_analyst"
+              }
+            ],
+            "tool_responses": [],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 0.0
+        }
+      ],
+      "session_input": {
+        "app_name": "tms_agent",
+        "user_id": "eval_user",
+        "state": {}
+      },
+      "creation_timestamp": 0.0,
+      "final_session_state": {}
+    }
+  ],
+  "creation_timestamp": 0.0
+}

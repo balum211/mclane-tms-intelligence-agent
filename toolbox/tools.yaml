@@ -1,0 +1,76 @@
+# Optional: expose curated TMS queries through MCP Toolbox for Databases
+# (https://github.com/googleapis/genai-toolbox), the pattern used in the
+# "Spec-Driven ADK Agent Development with Antigravity and Spec-kit" codelab.
+# Run:  ./toolbox --tools-file toolbox/tools.yaml   then point Antigravity / Gemini CLI MCP config at it.
+# The ADK agent itself uses the Python tools in tms_agent/tools (same SQL, more logic).
+# Check the toolbox release notes if your version expects a different file layout.
+
+sources:
+  tms-bigquery:
+    kind: bigquery
+    project: YOUR_PROJECT
+    location: US
+  tms-alloydb:
+    kind: alloydb-postgres
+    project: YOUR_PROJECT
+    region: us-central1
+    cluster: tms-cluster
+    instance: tms-primary
+    database: postgres
+    user: tms_reader
+    password: ${ALLOYDB_PASSWORD}
+
+tools:
+  carrier-scorecard:
+    kind: bigquery-sql
+    source: tms-bigquery
+    description: On-time %, average lateness and claims rate per carrier (all time).
+    statement: |
+      SELECT carrier_id, carrier_name, carrier_type, safety_rating, loads, on_time_pct, avg_minutes_late, claims_case_rate
+      FROM `YOUR_PROJECT.mclane_tms.v_carrier_scorecard` ORDER BY on_time_pct
+
+  lane-profitability:
+    kind: bigquery-sql
+    source: tms-bigquery
+    description: Margin and empty-mile % per lane (origin DC -> destination state) since a date.
+    parameters:
+      - name: since_date
+        type: string
+        description: ISO date, e.g. 2026-09-27
+    statement: |
+      SELECT lane, COUNT(*) AS loads, SUM(margin) AS margin,
+             SAFE_DIVIDE(SUM(margin), SUM(total_revenue)) AS margin_pct,
+             SAFE_DIVIDE(SUM(empty_miles), SUM(total_miles)) AS empty_mile_pct
+      FROM `YOUR_PROJECT.mclane_tms.v_load_profitability`
+      WHERE load_date >= DATE(@since_date)
+      GROUP BY lane ORDER BY margin_pct
+
+  open-exceptions:
+    kind: postgres-sql
+    source: tms-alloydb
+    description: Unresolved HIGH and CRITICAL exceptions with load and carrier.
+    statement: |
+      SELECT e.exception_id, e.exception_type, e.severity, e.event_ts, e.description, l.load_id, l.carrier_id
+      FROM tms.exceptions e JOIN tms.loads l ON l.load_id = e.load_id
+      WHERE e.resolved_flag = FALSE AND e.severity IN ('HIGH', 'CRITICAL')
+      ORDER BY e.event_ts DESC LIMIT 50
+
+  invoices-above-contract:
+    kind: postgres-sql
+    source: tms-alloydb
+    description: Carrier invoices whose billed rate per mile exceeds the lane contract rate by more than 1%.
+    statement: |
+      SELECT ci.carrier_invoice_id, ci.carrier_id, l.origin_dc_id || '->' || l.dest_region_state AS lane,
+             ci.billed_rate_per_mile, r.rate_per_mile AS contract_rate
+      FROM tms.carrier_invoices ci JOIN tms.loads l ON l.load_id = ci.load_id
+      JOIN tms.carrier_rates r ON r.carrier_id = ci.carrier_id AND r.origin_dc_id = l.origin_dc_id
+       AND r.dest_state = l.dest_region_state AND r.equipment_type = l.equipment_type
+      WHERE ci.billed_rate_per_mile > r.rate_per_mile * 1.01
+      ORDER BY ci.billed_rate_per_mile - r.rate_per_mile DESC LIMIT 50
+
+toolsets:
+  tms_toolset:
+    - carrier-scorecard
+    - lane-profitability
+    - open-exceptions
+    - invoices-above-contract
