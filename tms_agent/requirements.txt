@@ -1,0 +1,6 @@
+# Runtime dependencies staged with the agent by `adk deploy agent_engine` / `adk deploy cloud_run`.
+google-adk>=2.0
+google-cloud-bigquery>=3.25
+psycopg[binary]>=3.2
+psycopg-pool>=3.2
+duckdb>=1.1
