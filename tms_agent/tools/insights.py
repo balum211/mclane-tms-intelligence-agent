@@ -6,7 +6,9 @@ from tms_agent.tools.audit import audit_carrier_invoices
 from tms_agent.tools.carrier import get_carrier_scorecard
 from tms_agent.tools.common import ok, run, safe, window
 from tms_agent.tools.cost import get_accessorial_leakage, get_lane_profitability
+from tms_agent.tools.delivery import get_dwell_time_changes, get_geofence_compliance, get_otd_scorecard
 from tms_agent.tools.kpi import get_ops_kpi_snapshot
+from tms_agent.tools.miles import get_out_of_route_miles
 from tms_agent.tools.predict import predict_load_delays
 
 
@@ -47,7 +49,8 @@ def get_spot_vs_contract_premium(days: int = 30) -> dict:
 @safe
 def get_weekly_insights_pack() -> dict:
     """Collects the weekly TMS review: KPIs vs prior week, worst lanes, carrier flags, invoice audit
-    savings, accessorial leakage, spot/broker premium and tomorrow's at-risk loads.
+    savings, accessorial leakage, spot/broker premium, tomorrow's at-risk loads, Retail vs Restaurant
+    OTD, dwell time changes, out-of-route drivers and geocode fixes.
 
     Returns:
         A dict of sections; the coordinator turns it into the weekly insight narrative.
@@ -73,4 +76,10 @@ def get_weekly_insights_pack() -> dict:
         "spot_vs_contract_30d": {"rows": spot.get("data"), "est_overspend_usd": spot.get("est_overspend_usd")},
         "at_risk_tomorrow": {"flagged": delays.get("flagged"), "upcoming": delays.get("upcoming_loads"),
                              "top": (delays.get("data") or [])[:5]},
+        "otd_by_channel_28d": data(get_otd_scorecard(28, "channel")),
+        "dwell_time_changes": data(get_dwell_time_changes(limit=5)),
+        "out_of_route_90d": [r for r in (data(get_out_of_route_miles(90, "driver")) or []) if isinstance(r, dict) and r.get("flag")],
+        "geocode_fixes_30d": (lambda g: {"geofence_auto_arrival_pct": g.get("geofence_auto_arrival_pct"),
+                                         "locations": g.get("locations_missing_geofence", [])[:5]}
+                              if isinstance(g, dict) and "error" not in g else g)(data(get_geofence_compliance(30))),
     })

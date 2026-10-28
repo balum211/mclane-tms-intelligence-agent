@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS tms.locations (
   dock_close_hour INTEGER,
   avg_unload_minutes INTEGER,
   requires_liftgate BOOLEAN,
+  geocode_quality TEXT,
+  geofence_radius_m INTEGER,
   padd_region TEXT,
   PRIMARY KEY (location_id)
 );
@@ -56,6 +58,8 @@ COMMENT ON COLUMN tms.locations.dock_open_hour IS 'Receiving window open hour (0
 COMMENT ON COLUMN tms.locations.dock_close_hour IS 'Receiving window close hour (0-23, local).';
 COMMENT ON COLUMN tms.locations.avg_unload_minutes IS 'Typical unload time in minutes.';
 COMMENT ON COLUMN tms.locations.requires_liftgate IS 'Delivery needs a liftgate / small-format trailer.';
+COMMENT ON COLUMN tms.locations.geocode_quality IS 'ROOFTOP | STREET | ZIP_CENTROID. ZIP_CENTROID coordinates are approximate and break geofences.';
+COMMENT ON COLUMN tms.locations.geofence_radius_m IS 'Radius in meters of the circular geofence used for automatic arrive / depart.';
 COMMENT ON COLUMN tms.locations.padd_region IS 'DOE fuel region (PADD1..PADD5) used for fuel surcharge.';
 CREATE INDEX IF NOT EXISTS ix_locations_customer_id ON tms.locations (customer_id);
 CREATE INDEX IF NOT EXISTS ix_locations_dc_id ON tms.locations (dc_id);
@@ -211,6 +215,9 @@ CREATE TABLE IF NOT EXISTS tms.loads (
   loaded_miles DOUBLE PRECISION,
   empty_miles DOUBLE PRECISION,
   total_miles DOUBLE PRECISION,
+  mileage_source TEXT,
+  pcmiler_shortest_miles DOUBLE PRECISION,
+  actual_odometer_miles DOUBLE PRECISION,
   dest_region_state TEXT,
   load_status TEXT,
   total_revenue NUMERIC(14,2),
@@ -234,7 +241,10 @@ COMMENT ON COLUMN tms.loads.actual_end_ts IS 'Actual return / final stop departu
 COMMENT ON COLUMN tms.loads.stop_count IS 'Number of delivery stops.';
 COMMENT ON COLUMN tms.loads.loaded_miles IS 'Miles driven with freight.';
 COMMENT ON COLUMN tms.loads.empty_miles IS 'Deadhead / return miles.';
-COMMENT ON COLUMN tms.loads.total_miles IS 'loaded_miles + empty_miles.';
+COMMENT ON COLUMN tms.loads.total_miles IS 'loaded_miles + empty_miles. Planned route miles from PC*MILER (practical route).';
+COMMENT ON COLUMN tms.loads.mileage_source IS 'Where planned miles came from: PCMILER_PRACTICAL (TMW PC*MILER interface) or MANUAL.';
+COMMENT ON COLUMN tms.loads.pcmiler_shortest_miles IS 'PC*MILER shortest-route miles for the same stop sequence (lower bound, used in rate disputes).';
+COMMENT ON COLUMN tms.loads.actual_odometer_miles IS 'ELD / odometer miles actually driven (private fleet only, NULL for carriers or loads not completed).';
 COMMENT ON COLUMN tms.loads.dest_region_state IS 'State of the final stop, used to define lanes (origin DC -> state).';
 COMMENT ON COLUMN tms.loads.load_status IS 'PLANNED | DISPATCHED | IN_TRANSIT | COMPLETED | CANCELLED.';
 COMMENT ON COLUMN tms.loads.total_revenue IS 'Sum of revenue of orders on the load USD.';
@@ -257,6 +267,9 @@ CREATE TABLE IF NOT EXISTS tms.stops (
   departure_ts TIMESTAMP,
   on_time_flag BOOLEAN,
   minutes_late INTEGER,
+  minutes_early INTEGER,
+  arrival_source TEXT,
+  pcmiler_leg_miles DOUBLE PRECISION,
   dwell_minutes INTEGER,
   detention_minutes INTEGER,
   cases_delivered INTEGER,
@@ -279,6 +292,9 @@ COMMENT ON COLUMN tms.stops.arrival_ts IS 'Actual arrival. NULL if not yet arriv
 COMMENT ON COLUMN tms.stops.departure_ts IS 'Actual departure.';
 COMMENT ON COLUMN tms.stops.on_time_flag IS 'TRUE when arrival <= appt_window_end_ts.';
 COMMENT ON COLUMN tms.stops.minutes_late IS 'Minutes after window end (0 if on time).';
+COMMENT ON COLUMN tms.stops.minutes_early IS 'Minutes before window start (0 if not early). Restaurants count arrivals more than 15 min early as an OTD miss.';
+COMMENT ON COLUMN tms.stops.arrival_source IS 'How arrival was recorded: GEOFENCE (automatic) | DRIVER_MANUAL (keyed on the ELD) | CARRIER_EDI214.';
+COMMENT ON COLUMN tms.stops.pcmiler_leg_miles IS 'PC*MILER practical miles from the previous stop (or the DC) to this stop.';
 COMMENT ON COLUMN tms.stops.dwell_minutes IS 'Minutes from arrival to departure.';
 COMMENT ON COLUMN tms.stops.detention_minutes IS 'Billable wait beyond the 2 hour free time.';
 COMMENT ON COLUMN tms.stops.cases_delivered IS 'Cases delivered.';
@@ -461,6 +477,35 @@ COMMENT ON COLUMN tms.check_calls.reefer_setpoint_f IS 'Reefer setpoint F, NULL 
 COMMENT ON COLUMN tms.check_calls.eta_next_stop_ts IS 'ETA to next stop computed by telematics.';
 CREATE INDEX IF NOT EXISTS ix_check_calls_load_id ON tms.check_calls (load_id);
 
+CREATE TABLE IF NOT EXISTS tms.geofence_events (
+  geofence_event_id TEXT NOT NULL,
+  load_id TEXT,
+  stop_id TEXT,
+  location_id TEXT,
+  event_type TEXT,
+  event_ts TIMESTAMP,
+  event_date DATE,
+  latitude DOUBLE PRECISION,
+  longitude DOUBLE PRECISION,
+  distance_from_location_m INTEGER,
+  PRIMARY KEY (geofence_event_id)
+);
+
+COMMENT ON TABLE tms.geofence_events IS 'Automatic ENTER / EXIT events when a tracked truck crosses a location geofence. Missing events at a stop usually mean a bad geocode.';
+COMMENT ON COLUMN tms.geofence_events.geofence_event_id IS 'Event id.';
+COMMENT ON COLUMN tms.geofence_events.load_id IS 'Load.';
+COMMENT ON COLUMN tms.geofence_events.stop_id IS 'Stop the event was matched to.';
+COMMENT ON COLUMN tms.geofence_events.location_id IS 'Location whose geofence was crossed.';
+COMMENT ON COLUMN tms.geofence_events.event_type IS 'ENTER | EXIT.';
+COMMENT ON COLUMN tms.geofence_events.event_ts IS 'When the truck crossed the geofence.';
+COMMENT ON COLUMN tms.geofence_events.event_date IS 'Date of the event.';
+COMMENT ON COLUMN tms.geofence_events.latitude IS 'Truck latitude at the event.';
+COMMENT ON COLUMN tms.geofence_events.longitude IS 'Truck longitude at the event.';
+COMMENT ON COLUMN tms.geofence_events.distance_from_location_m IS 'Distance from the stored location coordinates in meters.';
+CREATE INDEX IF NOT EXISTS ix_geofence_events_stop_id ON tms.geofence_events (stop_id);
+CREATE INDEX IF NOT EXISTS ix_geofence_events_location_id ON tms.geofence_events (location_id);
+CREATE INDEX IF NOT EXISTS ix_geofence_events_event_date ON tms.geofence_events (event_date);
+
 CREATE TABLE IF NOT EXISTS tms.exceptions (
   exception_id TEXT NOT NULL,
   load_id TEXT,
@@ -548,8 +593,12 @@ WHERE l.load_status = 'COMPLETED';
 CREATE OR REPLACE VIEW tms.v_stop_service AS
 SELECT s.stop_id, s.load_id, s.order_id, s.delivery_date, s.location_id, loc.location_name,
        loc.customer_id, cu.customer_name, cu.segment, cu.business_unit, l.origin_dc_id, l.carrier_id,
-       s.on_time_flag, s.minutes_late, s.dwell_minutes, s.detention_minutes,
-       s.cases_delivered, s.cases_short, s.cases_damaged, s.refused_flag
+       s.on_time_flag, s.minutes_late, s.minutes_early, s.dwell_minutes, s.detention_minutes,
+       s.cases_delivered, s.cases_short, s.cases_damaged, s.refused_flag, s.arrival_source, s.pcmiler_leg_miles,
+       CASE WHEN cu.business_unit = 'FOODSERVICE' THEN 'RESTAURANT' ELSE 'RETAIL' END AS otd_channel,
+       CASE WHEN s.minutes_late > 0 THEN FALSE
+            WHEN cu.business_unit = 'FOODSERVICE' AND s.minutes_early > 15 THEN FALSE
+            ELSE TRUE END AS otd_flag
 FROM tms.stops s
 JOIN tms.loads l ON l.load_id = s.load_id
 JOIN tms.locations loc ON loc.location_id = s.location_id

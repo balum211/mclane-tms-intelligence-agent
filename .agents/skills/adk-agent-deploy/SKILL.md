@@ -10,9 +10,11 @@ Full guide: `docs/DEPLOYMENT.md`. Never print or commit secrets; they belong in 
 
 ## Steps
 
-1. **Pre-flight**: `pytest -q` passes; `gcloud config get-value project` is the target project;
-   `tms_agent/.env` exists (copy `.env.example`) with `GOOGLE_GENAI_USE_ENTERPRISE=1`,
-   `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION` and the data backend settings.
+1. **Pre-flight**: `uv run pytest -q` passes; `gcloud config get-value project` is the target project;
+   `tms_agent/.env` exists (copy `.env.example`) with `GOOGLE_GENAI_USE_ENTERPRISE=True`,
+   `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION=global` and the data backend settings (plus
+   `PCMILER_API_KEY` if live PC*MILER miles are wanted). Optionally `uv run python server.py` and
+   `curl localhost:8080/list-apps` to check the same app Cloud Run will serve.
 2. **Data + IAM**: `PROJECT_ID=<p> ./deployment/setup_gcp.sh bigquery` (or `alloydb`, `both`).
    It enables APIs, creates the `tms-agent` service account with read-only data access and
    write access only to `agent_decision_log`, loads the synthetic data and trains the BQML model.

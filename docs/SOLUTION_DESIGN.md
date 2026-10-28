@@ -67,18 +67,22 @@ the agent's knowledge never drift apart.
 
 ## 3. Agents per capability, with evaluation metrics
 
-The coordinator (`tms_intelligence`) routes to six specialists through ADK `AgentTool`, so it can
-combine several answers into one. 30 tools in total.
+The coordinator (`tms_intelligence`) routes to seven specialists through ADK `AgentTool`, so it can
+combine several answers into one. 36 tools in total.
 
 | Capability | Agent / tools | How it decides | Evaluation metric | Result on synthetic data |
 |---|---|---|---|---|
 | Invoice audit | freight_audit_analyst: `audit_carrier_invoices`, `get_invoice_audit_detail`, `recommend_invoice_dispute`, `extract_and_audit_invoice_document` | Recomputes the expected linehaul (contract), fuel (DOE week x PADD), detention (stop minutes) and lumper (receipt). Spot loads are checked against the company-standard schedule | Catch rate (recall), precision, correct reason code | **Precision 100%, recall 100%, correct code 96%** on 210 planted errors. This is expected because the rules mirror the generator, so real-world rates will be lower and should be measured on audited history |
 | Messy inputs | same | Missing fuel / illegible rate / no contract → `NEEDS_REVIEW` with the reason. Never estimated | % of invoices with gaps flagged rather than paid | Every missing-field invoice flagged (unit tested) |
-| Delay prediction | service_exceptions_analyst: `predict_load_delays`, `get_delay_model_card` | Smoothed target encoding of pre-dispatch features (DC x weekday, carrier, equipment / reefer age, stops, riskiest receiver with leave-one-out, miles) combined in log-odds. Top drivers become mitigations | Time-based holdout (last 14 days): AUC, precision / recall at a threshold, top-decile lift | **AUC 0.69, top-decile lift 2.2x** (53% late vs 24% base); precision 0.50 / recall 0.23 at p ≥ 0.30 |
-| Carrier recommendation | carrier_performance_analyst: `recommend_carrier_for_load`, `recommend_carriers`, `get_carrier_scorecard`, `get_tender_acceptance` | Score = 50% on-time (lane history when ≥ 3 loads) + 25% expected cost (contract + DOE fuel / spot premium / private fleet cost) + 25% acceptance − safety penalty. Private fleet only when drivers are free | Backtest: on-time and cost of the recommended carrier vs the carrier actually used; share of auto-tenders later overridden | Example: LGH0005494 moves from Redline to the private fleet, saving $351 and +20.8 pts on-time |
+| Delay prediction | service_exceptions_analyst: `predict_load_delays`, `get_delay_model_card` | Smoothed target encoding of pre-dispatch features (DC x weekday, carrier, equipment / reefer age, stops, riskiest receiver with leave-one-out, miles) combined in log-odds. Top drivers become mitigations | Time-based holdout (last 14 days): AUC, precision / recall at a threshold, top-decile lift | **AUC 0.72, top-decile lift 1.8x** (55% late vs 30% base); precision 0.51 / recall 0.30 at p ≥ 0.30 |
+| Carrier recommendation | carrier_performance_analyst: `recommend_carrier_for_load`, `recommend_carriers`, `get_carrier_scorecard`, `get_tender_acceptance` | Score = 50% on-time (lane history when ≥ 3 loads) + 25% expected cost (contract + DOE fuel / spot premium / private fleet cost) + 25% acceptance − safety penalty. Private fleet only when drivers are free | Backtest: on-time and cost of the recommended carrier vs the carrier actually used; share of auto-tenders later overridden | Example: LGH0005494 moves from Redline to the private fleet, saving $351 and +23.5 pts on-time |
 | Auto-tender guardrails | coordinator: `tender_load` | Recomputes cost and confidence from data, never from the chat. Within the cap and confidence → AUTO_EXECUTED. Otherwise ADK `request_confirmation` → APPROVED / REJECTED. Every path is logged | 0 auto-actions above the cap or below 80% (unit + runner tests) | Enforced in tests, including the real ADK runner emitting `adk_request_confirmation` |
-| NL-to-SQL | tms_data_analyst: `get_tms_schema`, `run_tms_sql` | Schema-grounded, single SELECT, guard blocks DML / DDL / file functions, row cap, read-only connection | Execution accuracy on the ADK eval set; guard bypass attempts | 10-case eval set + 12 guard tests |
-| Weekly insights | coordinator: `get_weekly_insights_pack` | Collects KPIs, lanes, carrier flags, audit, leakage, spot premium and tomorrow's risk | Rubric-based LLM judge (grounded, recommendation contract, actionable) | `evals/test_config.json` |
+| NL-to-SQL | tms_data_analyst: `get_tms_schema`, `run_tms_sql` | Schema-grounded, single SELECT, guard blocks DML / DDL / file functions, row cap, read-only connection | Execution accuracy on the ADK eval set; guard bypass attempts | 14-case eval set + 12 guard tests |
+| Retail vs Restaurant OTD | delivery_performance_analyst: `get_otd_scorecard` | McLane rule per channel: Retail on time = not after the window end; Restaurant also not more than 15 min early. Grouped by channel, DC, customer, carrier or week, with penalty exposure | OTD % vs customer target, early vs late misses | Retail 84.6% vs Restaurant 78.9% (28 days); DC07 restaurants 71.0% |
+| Dwell time change | delivery_performance_analyst: `get_dwell_time_changes` | Recent window vs baseline per customer / location / DC / channel; small samples set aside as LOW_SAMPLE; truck-hour cost from `TMS_TRUCK_HOUR_COST_USD` | Planted changes found, direction correct | Fresh Basket +27.7 min (~$151k a year), Cluck & Co −16.1 min |
+| Geofence and geocodes | delivery_performance_analyst: `get_geofence_compliance`, `track_load` | Arrival source mix; locations where most arrivals are manual; corrected point = median of stopped ELD pings at arrival, otherwise NEEDS_REVIEW | Bad geocodes found, offset of the suggested fix | 92.1% auto-arrival; flagged locations are all ZIP_CENTROID, > 1 km off |
+| PC*MILER miles | freight_audit_analyst: `check_pcmiler_miles`; fleet_operations_analyst: `get_out_of_route_miles` | TMS miles are PC*MILER practical; billed vs practical > 2% = MILES_INFLATED; odometer vs practical = out-of-route. Live PC*MILER Web Services when `PCMILER_API_KEY` is set, otherwise a labelled estimate | Out-of-route outliers found | Four DC08 drivers at ~13% vs ~2.5% fleet |
+| Weekly insights | coordinator: `get_weekly_insights_pack` | Collects KPIs, lanes, carrier flags, audit, leakage, spot premium, tomorrow's risk, OTD by channel, dwell changes, out-of-route and geocode fixes | Rubric-based LLM judge (grounded, recommendation contract, actionable) | `evals/test_config.json` |
 
 **Recommendation contract.** The global instruction requires every recommendation to show
 *Reasoning, Data used, Confidence, $ impact*. The tools return those fields (`reasoning`,
@@ -110,7 +114,7 @@ The full script is in [DEMO_SCRIPT.md](DEMO_SCRIPT.md). The three required momen
 **C. Carrier recommendation and guardrailed tender**
 > "Recommend a carrier for load LGH0005494 and tender it."
 
-The recommendation is the private fleet, expected $654, confidence 0.99, saving $351 and +20.8 pts
+The recommendation is the private fleet, expected $654, confidence 0.99, saving $351 and +23.5 pts
 on-time vs the assigned Redline. `tender_load` returns AUTO_EXECUTED and logs it.
 "Tender it to CR006 instead" pauses for approval (confidence below 80%, CONDITIONAL safety rating,
 not the top choice). Approving or rejecting is logged too.
@@ -126,7 +130,10 @@ assumptions are stated so they can be swapped for real volumes.
 | Accessorial leakage (unbilled detention / lumper) | $83k recoverable, mostly BurgerBarn (26% detention capture) | ~$338k | Customer contracts allow detention billing at $75/hr after 2h |
 | Unprofitable lane DC05→NV | −$61k margin, 48% empty miles | ~−$250k exposure | Backhaul or rate / minimum-charge fix recovers half |
 | Reefer excursions on 9+ yr units | 17.6% excursion rate vs 0.6% on newer units, ~$595k est. product loss | Large: replace or repair the worst units first | The product-loss estimate per excursion |
-| Carrier mix (Redline) | 73.6% on-time vs 88% private fleet, 60% tender acceptance | Fewer late penalties, fewer re-tenders | Capacity is available on the alternative carriers |
+| Restaurant early / late arrivals | Restaurant OTD 78.9% vs 94% target, 108 early misses in 28 days | Fewer refused deliveries and penalties | Restaurant receiving windows are enforced as in the data |
+| Dwell creep at Fresh Basket | +27.7 min per stop | ~$151k a year of truck time at $85/hr | Truck-hour cost and the cause (dock staffing vs appointment mix) |
+| Out-of-route miles (DC08) | ~13% OOR on four drivers vs ~2.5% fleet | Fuel and maintenance on the extra miles (see `get_out_of_route_miles`) | Odometer feed quality from the ELD provider |
+| Carrier mix (Redline) | 71.8% on-time vs 86% private fleet, 60% tender acceptance | Fewer late penalties, fewer re-tenders | Capacity is available on the alternative carriers |
 | Analyst / audit hours | 77% of invoices pass automatically, ~10 min manual review each | ~600 hours a year in freight audit, plus planner tendering time | Manual review time per invoice and per tender |
 
 **Success metrics for a 90-day pilot:** audit catch rate on real bills, $ recovered, % of loads

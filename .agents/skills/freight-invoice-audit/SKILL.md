@@ -12,10 +12,10 @@ command line and explains how to extend them safely.
 
 ```bash
 S=.agents/skills/freight-invoice-audit/scripts/audit.py
-python $S summary --days 90                     # overbilling by carrier (or --group-by lane|finding)
-python $S invoice CINV0000069                   # one invoice: expected vs billed, findings, evidence
-python $S extracted fields.json                 # audit fields already extracted from a document
-python $S pdf data/sample_invoices/03_scanned_detention_illegible_fuel_CINV0000072.pdf   # Gemini extraction (needs credentials)
+uv run python $S summary --days 90                     # overbilling by carrier (or --group-by lane|finding)
+uv run python $S invoice CINV0000069                   # one invoice: expected vs billed, findings, evidence
+uv run python $S extracted fields.json                 # audit fields already extracted from a document
+uv run python $S pdf data/sample_invoices/03_scanned_detention_illegible_fuel_CINV0000072.pdf   # Gemini extraction (needs credentials)
 ```
 
 ## Rules and reason codes
@@ -46,5 +46,5 @@ Disputes are recommendations only: `recommend_invoice_dispute` logs them as PEND
 1. Edit `audit_invoice_row` and keep the evidence string specific (billed vs expected, source).
 2. If the generator should plant a new error type, add it in `tms_data/generate.py`
    (`_carrier_invoice`) and to `_truth_invoice_errors.csv`.
-3. Run `pytest -q tests/test_capabilities.py` and `python evals/run_offline_evals.py`. Precision,
+3. Run `uv run pytest -q tests/test_capabilities.py` and `uv run python evals/run_offline_evals.py`. Precision,
    recall and correct-code rate must not drop.

@@ -22,7 +22,12 @@ SELECT COUNT(*) AS stops,
        1.0 * SUM(CASE WHEN on_time_flag THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS on_time_pct,
        SUM(detention_minutes) / 60.0 AS detention_hours,
        1.0 * SUM(cases_short + cases_damaged) / NULLIF(SUM(cases_delivered + cases_short), 0) AS claims_case_rate,
-       SUM(CASE WHEN refused_flag THEN 1 ELSE 0 END) AS refused_stops
+       SUM(CASE WHEN refused_flag THEN 1 ELSE 0 END) AS refused_stops,
+       1.0 * SUM(CASE WHEN otd_channel = 'RETAIL' AND otd_flag THEN 1 ELSE 0 END)
+           / NULLIF(SUM(CASE WHEN otd_channel = 'RETAIL' THEN 1 ELSE 0 END), 0) AS retail_otd_pct,
+       1.0 * SUM(CASE WHEN otd_channel = 'RESTAURANT' AND otd_flag THEN 1 ELSE 0 END)
+           / NULLIF(SUM(CASE WHEN otd_channel = 'RESTAURANT' THEN 1 ELSE 0 END), 0) AS restaurant_otd_pct,
+       AVG(dwell_minutes) AS avg_dwell_minutes
 FROM {p}v_stop_service
 WHERE delivery_date BETWEEN :start AND :end AND (:dc_id = '' OR origin_dc_id = :dc_id)
 """
@@ -40,8 +45,8 @@ def get_ops_kpi_snapshot(days: int = 7, dc_id: str = "") -> dict:
     """Network (or single-DC) KPI snapshot for the last N days versus the prior N days.
 
     KPIs: completed loads, revenue, margin and margin %, cost per mile, empty-mile %, private
-    fleet share, on-time %, detention hours, claims rate, refused stops, plus open exceptions
-    by severity and today's in-transit load count.
+    fleet share, on-time %, Retail and Restaurant OTD %, average dwell, detention hours, claims
+    rate, refused stops, plus open exceptions by severity and today's in-transit load count.
 
     Args:
         days: Period length in days (default 7).

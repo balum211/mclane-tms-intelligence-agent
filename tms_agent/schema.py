@@ -78,6 +78,8 @@ TABLES: tuple[Table, ...] = (
             _c("dock_close_hour", "INT", "Receiving window close hour (0-23, local)."),
             _c("avg_unload_minutes", "INT", "Typical unload time in minutes."),
             _c("requires_liftgate", "BOOL", "Delivery needs a liftgate / small-format trailer."),
+            _c("geocode_quality", "STRING", "ROOFTOP | STREET | ZIP_CENTROID. ZIP_CENTROID coordinates are approximate and break geofences."),
+            _c("geofence_radius_m", "INT", "Radius in meters of the circular geofence used for automatic arrive / depart."),
             _c("padd_region", "STRING", "DOE fuel region (PADD1..PADD5) used for fuel surcharge."),
         ),
     ),
@@ -209,7 +211,10 @@ TABLES: tuple[Table, ...] = (
             _c("stop_count", "INT", "Number of delivery stops."),
             _c("loaded_miles", "FLOAT", "Miles driven with freight."),
             _c("empty_miles", "FLOAT", "Deadhead / return miles."),
-            _c("total_miles", "FLOAT", "loaded_miles + empty_miles."),
+            _c("total_miles", "FLOAT", "loaded_miles + empty_miles. Planned route miles from PC*MILER (practical route)."),
+            _c("mileage_source", "STRING", "Where planned miles came from: PCMILER_PRACTICAL (TMW PC*MILER interface) or MANUAL."),
+            _c("pcmiler_shortest_miles", "FLOAT", "PC*MILER shortest-route miles for the same stop sequence (lower bound, used in rate disputes)."),
+            _c("actual_odometer_miles", "FLOAT", "ELD / odometer miles actually driven (private fleet only, NULL for carriers or loads not completed)."),
             _c("dest_region_state", "STRING", "State of the final stop, used to define lanes (origin DC -> state)."),
             _c("load_status", "STRING", "PLANNED | DISPATCHED | IN_TRANSIT | COMPLETED | CANCELLED."),
             _c("total_revenue", "NUMERIC", "Sum of revenue of orders on the load USD."),
@@ -239,6 +244,9 @@ TABLES: tuple[Table, ...] = (
             _c("departure_ts", "TIMESTAMP", "Actual departure."),
             _c("on_time_flag", "BOOL", "TRUE when arrival <= appt_window_end_ts."),
             _c("minutes_late", "INT", "Minutes after window end (0 if on time)."),
+            _c("minutes_early", "INT", "Minutes before window start (0 if not early). Restaurants count arrivals more than 15 min early as an OTD miss."),
+            _c("arrival_source", "STRING", "How arrival was recorded: GEOFENCE (automatic) | DRIVER_MANUAL (keyed on the ELD) | CARRIER_EDI214."),
+            _c("pcmiler_leg_miles", "FLOAT", "PC*MILER practical miles from the previous stop (or the DC) to this stop."),
             _c("dwell_minutes", "INT", "Minutes from arrival to departure."),
             _c("detention_minutes", "INT", "Billable wait beyond the 2 hour free time."),
             _c("cases_delivered", "INT", "Cases delivered."),
@@ -367,6 +375,25 @@ TABLES: tuple[Table, ...] = (
         ),
     ),
     Table(
+        name="geofence_events",
+        tmw_equivalent="checkcall (geofence arrive / depart auto-status from the telematics provider)",
+        description="Automatic ENTER / EXIT events when a tracked truck crosses a location geofence. Missing events at a stop usually mean a bad geocode.",
+        primary_key="geofence_event_id",
+        foreign_keys={"load_id": "loads.load_id", "stop_id": "stops.stop_id", "location_id": "locations.location_id"},
+        columns=(
+            _c("geofence_event_id", "STRING", "Event id.", False),
+            _c("load_id", "STRING", "Load."),
+            _c("stop_id", "STRING", "Stop the event was matched to."),
+            _c("location_id", "STRING", "Location whose geofence was crossed."),
+            _c("event_type", "STRING", "ENTER | EXIT."),
+            _c("event_ts", "TIMESTAMP", "When the truck crossed the geofence."),
+            _c("event_date", "DATE", "Date of the event."),
+            _c("latitude", "FLOAT", "Truck latitude at the event."),
+            _c("longitude", "FLOAT", "Truck longitude at the event."),
+            _c("distance_from_location_m", "INT", "Distance from the stored location coordinates in meters."),
+        ),
+    ),
+    Table(
         name="exceptions",
         tmw_equivalent="expiration / event log (custom)",
         description="Operational exceptions raised on loads and stops.",
@@ -440,8 +467,12 @@ WHERE l.load_status = 'COMPLETED'
     "v_stop_service": """
 SELECT s.stop_id, s.load_id, s.order_id, s.delivery_date, s.location_id, loc.location_name,
        loc.customer_id, cu.customer_name, cu.segment, cu.business_unit, l.origin_dc_id, l.carrier_id,
-       s.on_time_flag, s.minutes_late, s.dwell_minutes, s.detention_minutes,
-       s.cases_delivered, s.cases_short, s.cases_damaged, s.refused_flag
+       s.on_time_flag, s.minutes_late, s.minutes_early, s.dwell_minutes, s.detention_minutes,
+       s.cases_delivered, s.cases_short, s.cases_damaged, s.refused_flag, s.arrival_source, s.pcmiler_leg_miles,
+       CASE WHEN cu.business_unit = 'FOODSERVICE' THEN 'RESTAURANT' ELSE 'RETAIL' END AS otd_channel,
+       CASE WHEN s.minutes_late > 0 THEN FALSE
+            WHEN cu.business_unit = 'FOODSERVICE' AND s.minutes_early > 15 THEN FALSE
+            ELSE TRUE END AS otd_flag
 FROM {p}stops s
 JOIN {p}loads l ON l.load_id = s.load_id
 JOIN {p}locations loc ON loc.location_id = s.location_id
@@ -487,7 +518,9 @@ VIEW_DESCRIPTIONS = {
     "v_stop_service": (
         "one row per arrived stop with customer context: stop_id, load_id, order_id, delivery_date, location_id, "
         "location_name, customer_id, customer_name, segment, business_unit, origin_dc_id, carrier_id, on_time_flag, "
-        "minutes_late, dwell_minutes, detention_minutes, cases_delivered, cases_short, cases_damaged, refused_flag."
+        "minutes_late, minutes_early, dwell_minutes, detention_minutes, cases_delivered, cases_short, cases_damaged, "
+        "refused_flag, arrival_source, pcmiler_leg_miles, otd_channel (RETAIL | RESTAURANT) and otd_flag (McLane OTD: "
+        "Retail = not after the window end; Restaurant = also not more than 15 min before the window start). Use otd_flag for OTD questions."
     ),
     "v_carrier_scorecard": (
         "all-time per carrier: carrier_id, carrier_name, carrier_type, safety_rating, loads, on_time_pct, "

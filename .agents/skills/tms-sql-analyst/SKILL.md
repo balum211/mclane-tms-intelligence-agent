@@ -11,14 +11,14 @@ for `tms_agent` tools, evals or demos.
 ## Steps
 
 1. Read `references/schema_cheatsheet.md` for the table map and join keys. For full column
-   descriptions run `python .agents/skills/tms-sql-analyst/scripts/query.py --schema`
+   descriptions run `uv run python .agents/skills/tms-sql-analyst/scripts/query.py --schema`
    (or `--schema loads stops` for a subset).
 2. Use the dataset "today" (`as_of`), never the wall clock: the script prints it with `--as-of`.
 3. Prefer the views. `v_stop_service` for on-time / dwell / detention, `v_load_profitability` for
    revenue / cost / margin, `v_carrier_scorecard` for carrier KPIs.
 4. Write ONE `SELECT` or `WITH` query in portable SQL: `1.0 * a / NULLIF(b, 0)` for ratios,
    `SUM(CASE WHEN ... THEN 1 ELSE 0 END)` for counts, explicit date literals instead of `CURRENT_DATE`.
-5. Run it: `python .agents/skills/tms-sql-analyst/scripts/query.py "SELECT ..."`. The script applies
+5. Run it: `uv run python .agents/skills/tms-sql-analyst/scripts/query.py "SELECT ..."`. The script applies
    the same guard as the agent (`tms_agent/sql_guard.py`) and caps rows.
 6. Answer with a short table, then the SQL in a code block, then the time window used. If a needed
    field is empty or missing, say so. Do not estimate it.
@@ -26,7 +26,7 @@ for `tms_agent` tools, evals or demos.
 ## Backend
 
 The script uses `TMS_DB_BACKEND` (default `duckdb` at `data/tms.duckdb`). Build the local database
-first if it is missing: `python -m tms_data.generate && python -m tms_data.load --target duckdb`.
+first if it is missing: `uv run python -m tms_data.generate && uv run python -m tms_data.load --target duckdb`.
 For BigQuery use fully qualified names `` `project.dataset.table` `` as printed by `--schema`.
 
 ## Examples

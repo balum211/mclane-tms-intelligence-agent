@@ -4,10 +4,11 @@
       ├── get_ops_kpi_snapshot, get_weekly_insights_pack, get_decision_log   (direct tools)
       ├── tender_load                  guardrailed auto-tender / human approval (ADK tool confirmation)
       ├── service_exceptions_analyst   (AgentTool) late / detention / at-risk / 24h delay prediction
-      ├── freight_audit_analyst        (AgentTool) invoice audit vs contract / DOE / stop evidence, PDFs
+      ├── delivery_performance_analyst (AgentTool) Retail vs Restaurant OTD / dwell change / geofence / live tracking
+      ├── freight_audit_analyst        (AgentTool) invoice audit vs contract / DOE / PC*MILER / stop evidence, PDFs
       ├── freight_cost_analyst         (AgentTool) lane margin / fuel / accessorial leakage / spot premium
       ├── carrier_performance_analyst  (AgentTool) scorecards / tenders / per-load recommendation
-      ├── fleet_operations_analyst     (AgentTool) HOS / utilization / maintenance
+      ├── fleet_operations_analyst     (AgentTool) HOS / utilization / maintenance / out-of-route miles
       └── tms_data_analyst             (AgentTool) NL-to-SQL over BigQuery / AlloyDB / DuckDB
 
 Run locally:  adk web .     (from the repo root)   or   adk run tms_agent
@@ -42,6 +43,12 @@ from tms_agent.tools.cost import (
     get_lane_profitability,
     get_load_margin_outliers,
 )
+from tms_agent.tools.delivery import (
+    get_dwell_time_changes,
+    get_geofence_compliance,
+    get_otd_scorecard,
+    track_load,
+)
 from tms_agent.tools.exceptions import (
     get_at_risk_loads,
     get_detention_hotspots,
@@ -52,6 +59,7 @@ from tms_agent.tools.exceptions import (
 from tms_agent.tools.fleet import get_driver_hos_status, get_fleet_utilization, get_maintenance_due
 from tms_agent.tools.insights import get_spot_vs_contract_premium, get_weekly_insights_pack
 from tms_agent.tools.kpi import get_ops_kpi_snapshot
+from tms_agent.tools.miles import check_pcmiler_miles, get_out_of_route_miles
 from tms_agent.tools.predict import get_delay_model_card, predict_load_delays
 from tms_agent.tools.tender import get_decision_log, tender_load
 
@@ -71,6 +79,16 @@ def build_root_agent(model=MODEL, sql_model=SQL_MODEL) -> LlmAgent:
         instruction=prompts.EXCEPTIONS_INSTRUCTION,
         tools=[get_open_exceptions, get_late_delivery_summary, get_detention_hotspots, get_at_risk_loads,
                get_reefer_excursions, predict_load_delays, get_delay_model_card],
+        generate_content_config=analyst_cfg,
+    )
+
+    delivery_performance_analyst = LlmAgent(
+        name="delivery_performance_analyst",
+        model=model,
+        description="McLane on-time delivery (OTD) for Retail vs Restaurant stops, dwell time changes at "
+        "receivers, geofence auto-arrival health and bad geocodes, and live load tracking from ELD pings.",
+        instruction=prompts.DELIVERY_INSTRUCTION,
+        tools=[get_otd_scorecard, get_dwell_time_changes, get_geofence_compliance, track_load],
         generate_content_config=analyst_cfg,
     )
 
@@ -97,20 +115,21 @@ def build_root_agent(model=MODEL, sql_model=SQL_MODEL) -> LlmAgent:
     freight_audit_analyst = LlmAgent(
         name="freight_audit_analyst",
         model=model,
-        description="Audits carrier freight invoices against contract rates, DOE fuel table and stop evidence; "
-        "flags overbilling with $ impact; reads scanned invoice PDFs; drafts disputes.",
+        description="Audits carrier freight invoices against contract rates, DOE fuel table, PC*MILER miles and "
+        "stop evidence; flags overbilling with $ impact; reads scanned invoice PDFs; drafts disputes.",
         instruction=prompts.AUDIT_INSTRUCTION,
         tools=[audit_carrier_invoices, get_invoice_audit_detail, recommend_invoice_dispute,
-               extract_and_audit_invoice_document],
+               extract_and_audit_invoice_document, check_pcmiler_miles],
         generate_content_config=analyst_cfg,
     )
 
     fleet_operations_analyst = LlmAgent(
         name="fleet_operations_analyst",
         model=model,
-        description="Private fleet: driver hours of service, utilization by DC and preventive maintenance due.",
+        description="Private fleet: driver hours of service, utilization by DC, preventive maintenance due and "
+        "out-of-route miles (odometer vs PC*MILER).",
         instruction=prompts.FLEET_INSTRUCTION,
-        tools=[get_driver_hos_status, get_fleet_utilization, get_maintenance_due],
+        tools=[get_driver_hos_status, get_fleet_utilization, get_maintenance_due, get_out_of_route_miles],
         generate_content_config=analyst_cfg,
     )
 
@@ -136,6 +155,7 @@ def build_root_agent(model=MODEL, sql_model=SQL_MODEL) -> LlmAgent:
             tender_load,
             get_decision_log,
             AgentTool(agent=service_exceptions_analyst),
+            AgentTool(agent=delivery_performance_analyst),
             AgentTool(agent=freight_audit_analyst),
             AgentTool(agent=freight_cost_analyst),
             AgentTool(agent=carrier_performance_analyst),

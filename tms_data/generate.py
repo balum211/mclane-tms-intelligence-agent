@@ -175,6 +175,8 @@ def money(x: float) -> float:
 class Gen:
     def __init__(self, days: int, as_of: date, seed: int, loads_per_dc_day: int):
         self.rng = random.Random(seed)
+        # Separate stream for the McLane operational signals so the original stories keep their numbers.
+        self.rng2 = random.Random(seed + 1009)
         self.days = days
         self.as_of = as_of
         self.start = as_of - timedelta(days=days - 1)
@@ -195,7 +197,8 @@ class Gen:
             self.rows["locations"].append(dict(
                 location_id=dc_id, location_name=name, location_type="DC", customer_id=None, dc_id=dc_id,
                 city=city, state=st, latitude=lat, longitude=lon, dock_open_hour=0, dock_close_hour=23,
-                avg_unload_minutes=45, requires_liftgate=False, padd_region=padd))
+                avg_unload_minutes=45, requires_liftgate=False, geocode_quality="ROOFTOP", geofence_radius_m=400,
+                padd_region=padd))
 
         self.customers = {}
         for i, (name, seg, bu, tier, hq) in enumerate(CUSTOMERS, 1):
@@ -324,7 +327,8 @@ class Gen:
             location_id=lid, location_name=f"{cu['name']} #{self.ids[prefix]} {city}",
             location_type="RESTAURANT" if is_rest else "STORE", customer_id=cid, dc_id=dc_id, city=city, state=st,
             latitude=round(lat, 5), longitude=round(lon, 5), dock_open_hour=open_h, dock_close_hour=close_h,
-            avg_unload_minutes=unload, requires_liftgate=liftgate, padd_region=self.dc[dc_id]["padd"]))
+            avg_unload_minutes=unload, requires_liftgate=liftgate, geocode_quality="ROOFTOP",
+            geofence_radius_m=150 if is_rest else 200, padd_region=self.dc[dc_id]["padd"]))
 
     # -- fuel ---------------------------------------------------------------
     def build_fuel(self):
@@ -484,7 +488,8 @@ class Gen:
             row = dict(stop_id=stop_id, load_id=load_id, order_id=order_id, stop_sequence=i, location_id=lid,
                        delivery_date=window_start.date().isoformat(), appt_window_start_ts=ts(window_start),
                        appt_window_end_ts=ts(window_end), arrival_ts=None, departure_ts=None, on_time_flag=None,
-                       minutes_late=None, dwell_minutes=None, detention_minutes=None, cases_delivered=None,
+                       minutes_late=None, minutes_early=None, arrival_source=None, pcmiler_leg_miles=round(leg, 1),
+                       dwell_minutes=None, detention_minutes=None, cases_delivered=None,
                        cases_short=None, cases_damaged=None, refused_flag=None)
             if arrived:
                 minutes_late = max(0, int((act_t - window_end).total_seconds() // 60))
@@ -505,7 +510,8 @@ class Gen:
                 refused = rng.random() < (0.006 + (0.04 if minutes_late > 120 else 0))
                 departure = act_t + timedelta(minutes=dwell)
                 row.update(arrival_ts=ts(act_t), departure_ts=ts(departure), on_time_flag=minutes_late == 0,
-                           minutes_late=minutes_late, dwell_minutes=dwell, detention_minutes=detention,
+                           minutes_late=minutes_late,
+                           minutes_early=max(0, int((window_start - act_t).total_seconds() // 60)), dwell_minutes=dwell, detention_minutes=detention,
                            cases_delivered=cases - cases_short, cases_short=cases_short, cases_damaged=damaged,
                            refused_flag=refused)
                 if carrier_id != "MCLN" and detention:
@@ -627,7 +633,9 @@ class Gen:
             trailer_id=trailer_id, equipment_type=equip, load_date=d.isoformat(), planned_start_ts=ts(planned_start),
             actual_start_ts=ts(actual_start_v), planned_end_ts=ts(planned_end), actual_end_ts=ts(actual_end),
             stop_count=len(seq), loaded_miles=round(loaded_miles, 1), empty_miles=round(empty_miles, 1),
-            total_miles=round(total_miles, 1), dest_region_state=self.loc[seq[-1]]["state"], load_status=status,
+            total_miles=round(total_miles, 1), mileage_source="PCMILER_PRACTICAL",
+            pcmiler_shortest_miles=round(total_miles * self.rng2.uniform(0.93, 0.97), 1), actual_odometer_miles=None,
+            dest_region_state=self.loc[seq[-1]]["state"], load_status=status,
             total_revenue=money(load_revenue), total_cost=money(total_cost)))
         self.rows["stops"].extend(stop_rows)
 
@@ -794,6 +802,139 @@ class Gen:
                 t += timedelta(minutes=rng.uniform(45, 60))
             t += timedelta(minutes=45)
 
+    # -- McLane operational signals (PC*MILER, geofences, dwell change, OTD) ----
+    def build_mclane_signals(self):
+        """Post-pass on a separate RNG so the original planted stories keep their numbers.
+
+        * Geocodes: ~6% of stores / restaurants have ZIP_CENTROID coordinates 1.5-4 km off, so their
+          geofence never fires and drivers key arrivals by hand (with an ELD ping at the true spot).
+        * Geofence ENTER / EXIT events for every tracked arrival (private fleet always, ~60% of carrier
+          loads through a visibility provider; the rest report arrival by EDI 214).
+        * Dwell time change: Fresh Basket Grocers dwell up ~30 min in the last 3 weeks (new receiving
+          process); Cluck & Co Chicken dwell down ~14 min (moved to after-hours key drops).
+        * Restaurant OTD: DC07 private fleet drivers arrive early at restaurants (early = OTD miss).
+        * Odometer vs PC*MILER: four DC08 drivers run ~13% out-of-route miles.
+        """
+        rng = self.rng2
+        loc_rows = {r["location_id"]: r for r in self.rows["locations"]}
+        bad_geocode = set()
+        for lid, loc in self.loc.items():
+            row = loc_rows[lid]
+            q = weighted(rng, [("ROOFTOP", 0.8), ("STREET", 0.14), ("ZIP_CENTROID", 0.06)])
+            row["geocode_quality"] = q
+            if q == "ZIP_CENTROID":
+                off_km, bearing = rng.uniform(1.5, 4.0), rng.uniform(0, 2 * math.pi)
+                row["latitude"] = round(loc["lat"] + off_km / 111.0 * math.cos(bearing), 5)
+                row["longitude"] = round(loc["lon"] + off_km / (111.0 * math.cos(math.radians(loc["lat"]))) * math.sin(bearing), 5)
+                bad_geocode.add(lid)
+            elif q == "STREET":
+                row["latitude"] = round(loc["lat"] + rng.uniform(-0.0006, 0.0006), 5)
+                row["longitude"] = round(loc["lon"] + rng.uniform(-0.0006, 0.0006), 5)
+
+        loads = {r["load_id"]: r for r in self.rows["loads"]}
+        fresh = next(c for c, v in self.customers.items() if v["name"] == "Fresh Basket Grocers")
+        cluck = next(c for c, v in self.customers.items() if v["name"] == "Cluck & Co Chicken")
+        change_from = self.as_of - timedelta(days=20)
+        oor_drivers = set(rng.sample(sorted(self.drivers_by_dc["DC08"]), k=4))
+        tracked_carrier_load = {}
+
+        def parse(v):
+            return datetime.strptime(v, "%Y-%m-%d %H:%M:%S")
+
+        shift_by_load: dict[str, float] = defaultdict(float)  # minutes later than originally generated
+        last_dep: dict[str, datetime] = {}
+        for s in self.rows["stops"]:
+            if not s["arrival_ts"]:
+                continue
+            ld = loads[s["load_id"]]
+            loc = self.loc[s["location_id"]]
+            arr, dep = parse(s["arrival_ts"]), parse(s["departure_ts"])
+            private = ld["carrier_id"] == "MCLN"
+            # Keep the route physically consistent: never arrive before the previous stop's departure plus a
+            # minimum drive (the base generator's traffic noise can make very short legs negative).
+            prev_dep = last_dep.get(s["load_id"])
+            if prev_dep is not None:
+                min_arr = prev_dep + timedelta(minutes=max(2.0, s["pcmiler_leg_miles"] / 47 * 60 * 0.7))
+                gap = (min_arr - (arr + timedelta(minutes=shift_by_load[s["load_id"]]))).total_seconds() / 60
+                if gap > 0:
+                    shift_by_load[s["load_id"]] += gap
+            carried = shift_by_load[s["load_id"]]
+            if carried:
+                # A longer dwell earlier on the route pushes every later stop back.
+                arr, dep = arr + timedelta(minutes=carried), dep + timedelta(minutes=carried)
+                win_start, win_end = parse(s["appt_window_start_ts"]), parse(s["appt_window_end_ts"])
+                s["minutes_late"] = max(0, int((arr - win_end).total_seconds() // 60))
+                s["minutes_early"] = max(0, int((win_start - arr).total_seconds() // 60))
+                s["on_time_flag"] = s["minutes_late"] == 0
+            # Dwell time change at two customers (recent 3 weeks).
+            if date.fromisoformat(s["delivery_date"]) >= change_from and loc["cid"] in (fresh, cluck):
+                delta = rng.uniform(22, 40) if loc["cid"] == fresh else -rng.uniform(10, 18)
+                new_dwell = max(15, int(s["dwell_minutes"] + delta))
+                if not private:
+                    # Keep carrier detention (and its freight bill) unchanged.
+                    new_dwell = min(new_dwell, max(s["dwell_minutes"], 120)) if delta > 0 else \
+                        (max(new_dwell, s["dwell_minutes"]) if s["detention_minutes"] else new_dwell)
+                if delta > 0:
+                    shift_by_load[s["load_id"]] += new_dwell - s["dwell_minutes"]
+                s["dwell_minutes"] = new_dwell
+                if private:
+                    s["detention_minutes"] = max(0, new_dwell - 120)
+                dep = arr + timedelta(minutes=new_dwell)
+            # DC07 private fleet drivers run ahead of plan and hit restaurants before the window opens.
+            if (private and ld["origin_dc_id"] == "DC07" and s["location_id"].startswith("RST")
+                    and s["minutes_late"] == 0 and rng.random() < 0.5):
+                prev = last_dep.get(s["load_id"]) or parse(ld["actual_start_ts"])
+                room = (arr - prev).total_seconds() / 60 - 10
+                shift = min(rng.uniform(25, 70), room)
+                if shift > 0:
+                    arr, dep = arr - timedelta(minutes=shift), dep - timedelta(minutes=shift)
+                    win_start = parse(s["appt_window_start_ts"])
+                    s["minutes_early"] = max(0, int((win_start - arr).total_seconds() // 60))
+            s["arrival_ts"], s["departure_ts"] = ts(arr), ts(dep)
+            last_dep[s["load_id"]] = dep
+
+            if private:
+                tracked = True
+            else:
+                if s["load_id"] not in tracked_carrier_load:
+                    tracked_carrier_load[s["load_id"]] = rng.random() < 0.6
+                tracked = tracked_carrier_load[s["load_id"]]
+            if not tracked:
+                s["arrival_source"] = "CARRIER_EDI214"
+                continue
+            if s["location_id"] in bad_geocode or rng.random() < 0.025:
+                # Geofence never fired (bad geocode or GPS gap): driver keys the arrival on the ELD.
+                s["arrival_source"] = "DRIVER_MANUAL"
+                if s["location_id"] in bad_geocode:
+                    self.rows["check_calls"].append(dict(
+                        check_call_id=self.nid("CHK", 8), load_id=s["load_id"], event_ts=ts(arr),
+                        latitude=round(loc["lat"] + rng.uniform(-0.0004, 0.0004), 5),
+                        longitude=round(loc["lon"] + rng.uniform(-0.0004, 0.0004), 5), speed_mph=0.0,
+                        reefer_temp_f=None, reefer_setpoint_f=None, eta_next_stop_ts=None))
+                continue
+            s["arrival_source"] = "GEOFENCE"
+            radius = loc_rows[s["location_id"]]["geofence_radius_m"]
+            for etype, t in (("ENTER", arr - timedelta(minutes=rng.uniform(0.5, 3))),
+                             ("EXIT", dep + timedelta(minutes=rng.uniform(0.5, 3)))):
+                d_m = rng.uniform(0.6, 1.0) * radius
+                b = rng.uniform(0, 2 * math.pi)
+                lat = loc["lat"] + d_m / 111000 * math.cos(b)
+                lon = loc["lon"] + d_m / (111000 * math.cos(math.radians(loc["lat"]))) * math.sin(b)
+                stored = (loc_rows[s["location_id"]]["latitude"], loc_rows[s["location_id"]]["longitude"])
+                self.rows["geofence_events"].append(dict(
+                    geofence_event_id=self.nid("GEO", 8), load_id=s["load_id"], stop_id=s["stop_id"],
+                    location_id=s["location_id"], event_type=etype, event_ts=ts(t), event_date=t.date().isoformat(),
+                    latitude=round(lat, 5), longitude=round(lon, 5),
+                    distance_from_location_m=int(haversine_miles((lat, lon), stored) * 1609.34)))
+
+        for ld in self.rows["loads"]:
+            if shift_by_load[ld["load_id"]] and ld["actual_end_ts"]:
+                ld["actual_end_ts"] = ts(parse(ld["actual_end_ts"]) + timedelta(minutes=shift_by_load[ld["load_id"]]))
+            if ld["carrier_id"] != "MCLN" or ld["load_status"] != "COMPLETED":
+                continue
+            oor = rng.gauss(0.13, 0.03) if ld["driver_id"] in oor_drivers else max(-0.01, rng.gauss(0.025, 0.015))
+            ld["actual_odometer_miles"] = round(ld["total_miles"] * (1 + oor), 1)
+
     # -- output ------------------------------------------------------------
     def write(self, out: Path):
         out.mkdir(parents=True, exist_ok=True)
@@ -833,6 +974,7 @@ def generate(out: str | Path = "data/generated", days: int = 120, as_of: date | 
     g.build_master()
     g.build_fuel()
     g.build_loads()
+    g.build_mclane_signals()
     return g.write(Path(out))
 
 

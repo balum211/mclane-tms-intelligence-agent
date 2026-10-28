@@ -53,4 +53,4 @@ sql/        bigquery_schema.sql alloydb_schema.sql bigquery_ml_delay_model.sql s
 | Choice | Why | Simpler alternative rejected |
 |---|---|---|
 | Explainable target-encoding delay model in-process | Runs on any backend with zero infra, explains every prediction | Vertex AutoML: better accuracy, but needs training infra (BQML path provided) |
-| Python tools rather than MCP Toolbox only | Audit / scoring logic does not fit in SQL templates | `toolbox/tools.yaml` is still provided for Antigravity / Gemini CLI use |
+| Python tools rather than MCP Toolbox only | Audit / scoring logic does not fit in SQL templates | `tools.yaml` (MCP Toolbox) is still provided for Antigravity / Gemini CLI use |

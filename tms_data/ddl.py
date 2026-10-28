@@ -30,6 +30,7 @@ BQ_LAYOUT = {
     "exceptions": ("event_date", "exception_type, severity"),
     "carrier_tenders": ("tender_date", "carrier_id"),
     "check_calls": ("DATE(event_ts)", "load_id"),
+    "geofence_events": ("event_date", "location_id, load_id"),
 }
 
 # Secondary indexes for AlloyDB (the columnar engine accelerates the analytics on top).
@@ -42,6 +43,7 @@ PG_INDEXES = {
     "exceptions": ["load_id", "event_date", "exception_type"],
     "carrier_tenders": ["load_id", "carrier_id"],
     "check_calls": ["load_id"],
+    "geofence_events": ["stop_id", "location_id", "event_date"],
     "locations": ["customer_id", "dc_id"],
 }
 

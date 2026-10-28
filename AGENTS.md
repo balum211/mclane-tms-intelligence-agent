@@ -2,19 +2,23 @@
 
 This repo is a Google ADK (Python) multi-agent system that adds intelligence on top of a Trimble TMW
 TMS: carrier recommendation with guardrailed auto-tender, 24h delay prediction, freight invoice
-audit, NL-to-SQL and weekly insights. Data lives in BigQuery or AlloyDB (DuckDB locally).
+audit, NL-to-SQL, weekly insights and McLane delivery signals (Retail vs Restaurant OTD, dwell time
+change, geofences / geo locations, PC*MILER miles and out-of-route).
+Data lives in BigQuery or AlloyDB (DuckDB locally).
 
 Read first: `.specify/memory/constitution.md` (non-negotiable principles) and
-`specs/001-tms-intelligence/spec.md`.
+`specs/001-tms-intelligence/spec.md`, `specs/002-mclane-delivery-signals/spec.md`. Project context
+for Antigravity is in `.agents/rules/project-context.md`; reusable procedures are in `.agents/skills/`.
 
 ## Commands
 
 ```bash
-pip install -e ".[dev]"
-python -m tms_data.generate && python -m tms_data.load --target duckdb   # local data
-pytest -q                                                                # must stay green
-python evals/run_offline_evals.py                                        # audit + delay metrics
-adk web .                                                                # pick tms_agent
+uv sync                                                                  # or: pip install -e ".[dev]"
+uv run python -m tms_data.generate && uv run python -m tms_data.load --target duckdb   # local data
+uv run pytest -q                                                         # must stay green
+uv run python evals/run_offline_evals.py                                 # audit + delay metrics
+uv run adk web .                                                         # pick tms_agent
+uv run python server.py                                                  # ADK FastAPI app on :8080
 ```
 
 ## Rules
@@ -37,3 +41,11 @@ adk web .                                                                # pick 
    `tests/test_capabilities.py` when it backs a demo claim).
 9. Generated SQL from the model always goes through `sql_guard.ensure_read_only`.
 10. Synthetic data only. No real customer, carrier or driver names.
+11. **McLane rules.** OTD comes from `v_stop_service.otd_flag` (Retail: not after the window end;
+    Restaurant: also not more than 15 min early). `loads.total_miles` is PC*MILER practical. Never
+    label an estimate as PC*MILER miles: `mileage.route_miles` returns the `source` to show.
+12. **Generator changes keep the stories.** New signals in `tms_data/generate.py` use `self.rng2` in a
+    post-pass so the base random stream (and every existing story) is unchanged. Re-run `tests/test_capabilities.py` and
+    `tests/test_mclane_signals.py` after any change.
+13. **Ask, don't assume.** When a requirement is ambiguous (a window, a threshold, a customer), ask the
+    user (Antigravity `ask_question`) before writing code.

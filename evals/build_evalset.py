@@ -38,6 +38,17 @@ CASES = [
      "Shows excursion rate for 9+ year refrigeration units is many times higher and recommends replacing / repairing the worst trailers."),
     ("adhoc_sql", "How many stops did we deliver to TacoTrail restaurants last week and what was the average dwell time?",
      ["tms_data_analyst"], "Gives a stop count and an average dwell in minutes and shows the SQL it ran."),
+    ("otd_retail_restaurant", "How is on-time delivery for retail versus restaurants this month?",
+     ["delivery_performance_analyst"],
+     "Reports Retail and Restaurant OTD separately against target, explains that early restaurant arrivals count "
+     "as misses, and points to DC07 early arrivals."),
+    ("dwell_change", "Where did dwell time change in the last three weeks?", ["delivery_performance_analyst"],
+     "Names Fresh Basket Grocers with a dwell increase and Cluck & Co Chicken with a decrease, with truck hours and dollars."),
+    ("geofence", "Which stores have geofence problems and what should we fix?", ["delivery_performance_analyst"],
+     "Gives the geofence auto-arrival rate and lists locations with ZIP_CENTROID geocodes and suggested coordinates."),
+    ("pcmiler_out_of_route", "Which drivers are running the most out-of-route miles versus PC*MILER?",
+     ["fleet_operations_analyst"],
+     "Lists the flagged DC08 drivers with out-of-route %, extra miles and cost, and recommends a route compliance review."),
 ]
 
 RUBRICS = [

@@ -1,6 +1,6 @@
 # Synthetic TMW data and the stories planted in it
 
-`python -m tms_data.generate` builds a reproducible dataset (seed 42, as-of **2026-10-27**,
+`uv run python -m tms_data.generate` builds a reproducible dataset (seed 42, as-of **2026-10-27**,
 120 days). Every customer, carrier, driver and document is fictional.
 
 | Entity | Rows | Notes |
@@ -12,6 +12,7 @@
 | Carrier freight bills | 1.6k | EDI 210, PDF scans and emails, with planted overbilling and missing fields |
 | Carrier rate contracts | ~200 | Carrier x lane x equipment, DOE fuel surcharge, detention and lumper rules |
 | Telematics pings / exceptions | 2k / 5k | Reefer temperature, ETA, late, detention, shortage, HOS risk, breakdowns |
+| Geofence events | ~48k | ENTER / EXIT per tracked stop. Private fleet always tracked, carriers 60% (otherwise EDI 214) |
 
 ## Trimble TMW mapping
 
@@ -27,25 +28,41 @@
 | invoices | invoiceheader + invoicedetail | |
 | carrier_invoices | carrier freight bills / EDI 210 | |
 | check_calls | checkcall | |
+| geofence_events | checkcall geofence arrive / depart (TMW + ELD provider) | |
+
+## McLane signal columns
+
+| Column | Meaning |
+|---|---|
+| `loads.total_miles` | PC*MILER practical miles, as TMW plans them (`mileage_source = PCMILER_PRACTICAL`) |
+| `loads.pcmiler_shortest_miles`, `loads.actual_odometer_miles` | PC*MILER shortest miles; ELD odometer miles for completed private-fleet loads |
+| `stops.pcmiler_leg_miles` | PC*MILER miles from the previous stop |
+| `stops.minutes_early`, `stops.arrival_source` | Minutes before the window start; GEOFENCE, DRIVER_MANUAL or CARRIER_EDI214 |
+| `locations.geocode_quality`, `locations.geofence_radius_m` | ROOFTOP / STREET / ZIP_CENTROID; geofence radius (DC 400 m, store 200 m, restaurant 150 m) |
+| `v_stop_service.otd_channel`, `otd_flag` | RETAIL or RESTAURANT and the McLane on-time rule for that channel |
 
 ## Planted stories (what a good agent should find)
 
 | # | Story | Signal in the data (default dataset) | Tool that finds it |
 |---|---|---|---|
-| 1 | **Redline Freight Brokers (CR006) is the worst carrier** | 73.6% on-time vs 88.3% private fleet. 60% tender acceptance. CONDITIONAL safety rating. About 30% of its invoices overbilled | `get_carrier_scorecard`, `audit_carrier_invoices` |
+| 1 | **Redline Freight Brokers (CR006) is the worst carrier** | 71.8% on-time vs 86.1% private fleet. 60% tender acceptance. CONDITIONAL safety rating. About 30% of its invoices overbilled | `get_carrier_scorecard`, `audit_carrier_invoices` |
 | 2 | **BurgerBarn detention is mostly unbilled** | Tight 6-10am docks at the DC04 restaurants, about $58k recoverable with only 26% of detention billed | `get_accessorial_leakage`, `get_detention_hotspots` |
 | 3 | **Lane DC05→NV loses money** | −20% margin and 48% empty miles (no backhaul out of rural Nevada) | `get_lane_profitability`, `get_load_margin_outliers` |
 | 4 | **Old reefer units cause temperature excursions** | 17.6% of loads on 9+ year units vs about 0.6% on newer units | `get_reefer_excursions` |
-| 5 | **DC03 Concord is late on Mondays** | 52.6% Monday on-time, root cause LATE_DISPATCH | `get_late_delivery_summary(group_by="dc_day_of_week")` |
+| 5 | **DC03 Concord is late on Mondays** | 50.3% Monday on-time, root cause LATE_DISPATCH | `get_late_delivery_summary(group_by="dc_day_of_week")` |
 | 6 | **Diesel spike, surcharge lags** | +$0.68/gal in PADD3/PADD5 over the last 4 weeks. The surcharge uses a 2-week lag, so DC06 recovery fell from ~88% to ~81% | `get_fuel_surcharge_recovery(dc_id="DC06")` |
 | 7 | **Drivers near their HOS limit on live loads** | About 12 drivers with < 2h drive time, several still with stops left | `get_at_risk_loads`, `get_driver_hos_status` |
 | 8 | **Tobacco / candy shortages at DC02** | Tobacco / candy stops short 25% of the time at DC02 vs about 2% elsewhere (picking errors) | `get_open_exceptions`, NL-to-SQL |
 | + | **Carrier overbilling** | 210 planted errors: rate above contract, inflated miles, fuel above the DOE table, detention with no evidence, duplicate detention, lumper with no receipt. Ground truth is in `data/generated/_truth_invoice_errors.csv` | `audit_carrier_invoices` |
 | + | **Spot-market premium** | About 10% of outside loads move with a broker that has no lane contract, at a ~35% premium | `get_spot_vs_contract_premium` |
+| 9 | **Restaurant OTD trails Retail** | Restaurants (FOODSERVICE) must not arrive more than 15 min before the window. Last 28 days: Retail OTD 84.6% vs Restaurant 78.9% (not-late 82.7%, 108 early misses); DC07 restaurants worst at 71.0% | `get_otd_scorecard` |
+| 10 | **Dwell time changed at two customers** | Last 20 days: Fresh Basket Grocers dwell up +27.7 min (50.8 → 78.5, about $151k a year of truck time); Cluck & Co Chicken down −16.1 min | `get_dwell_time_changes` |
+| 11 | **Bad geocodes break geofences** | 6% of locations are ZIP_CENTROID (1.5-4 km off), so drivers key arrivals manually. Geofence auto-arrival 92.1% over 30 days; worst STR00289 is 1,988 m off, with a corrected point from stopped ELD pings | `get_geofence_compliance` |
+| 12 | **Out-of-route miles at DC08** | Four DC08 drivers (DRV00296, DRV00301, DRV00304, DRV00288) drive about 13% over PC*MILER practical miles vs about 2.5% for the fleet | `get_out_of_route_miles`, `check_pcmiler_miles` |
 | + | **Chronically congested receivers** | Location-specific congestion, which is the learnable signal behind the delay model | `predict_load_delays` |
 
 Regenerate with different parameters:
 
 ```bash
-python -m tms_data.generate --days 180 --loads-per-dc-day 10 --seed 7 --as-of 2026-10-27
+uv run python -m tms_data.generate --days 180 --loads-per-dc-day 10 --seed 7 --as-of 2026-10-27
 ```
