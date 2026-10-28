@@ -1,0 +1,174 @@
+# MCP Toolbox for Databases: curated read-only TMS queries (same layout as the sdd-adk-antigravity
+# codelab starter: one document per source / tool, separated by ---).
+#
+#   ./toolbox --tools-file tools.yaml          # serves on http://127.0.0.1:5000 (TOOLBOX_URL)
+#
+# Antigravity / Gemini CLI can call these through MCP, and `pip install -e ".[toolbox]"` lets an ADK
+# agent load them with toolbox_core.ToolboxSyncClient(TOOLBOX_URL).load_toolset(). The tms_agent ADK
+# package itself uses the Python tools in tms_agent/tools (same tables, plus audit and scoring logic
+# that does not fit in SQL). Values like ${GOOGLE_CLOUD_PROJECT} come from the root .env.
+# Check the Toolbox release notes if your version rejects a field.
+
+kind: source
+name: tms-alloydb
+type: alloydb-postgres
+project: ${GOOGLE_CLOUD_PROJECT}
+region: ${REGION}
+cluster: tms-cluster
+instance: tms-primary
+database: postgres
+user: tms_reader
+password: ${ALLOYDB_PASSWORD}
+
+---
+
+kind: source
+name: tms-bigquery
+type: bigquery
+project: ${GOOGLE_CLOUD_PROJECT}
+location: US
+
+---
+
+kind: tool
+name: otd_by_channel
+type: postgres-sql
+source: tms-alloydb
+description: >
+  McLane on-time delivery (OTD) for Retail and Restaurant stops since a date. Retail is on time when
+  it is not after the window end; Restaurant must also not be more than 15 minutes early.
+statement: |
+  SELECT otd_channel, COUNT(*) AS stops,
+         1.0 * SUM(CASE WHEN otd_flag THEN 1 ELSE 0 END) / COUNT(*) AS otd_pct,
+         SUM(CASE WHEN minutes_late = 0 AND NOT otd_flag THEN 1 ELSE 0 END) AS early_misses,
+         SUM(CASE WHEN minutes_late > 0 THEN 1 ELSE 0 END) AS late_misses
+  FROM tms.v_stop_service
+  WHERE delivery_date >= CAST($1 AS DATE)
+  GROUP BY otd_channel ORDER BY otd_channel
+parameters:
+  - name: since_date
+    type: string
+    description: ISO date, e.g. 2026-09-30.
+annotations:
+  readOnlyHint: true
+
+---
+
+kind: tool
+name: dwell_by_customer
+type: postgres-sql
+source: tms-alloydb
+description: >
+  Average dwell minutes per customer for a recent window starting at recent_start versus the
+  baseline window before it (from baseline_start). Use to spot dwell time changes at receivers.
+statement: |
+  SELECT customer_name,
+         AVG(CASE WHEN delivery_date < CAST($2 AS DATE) THEN dwell_minutes END) AS baseline_dwell_min,
+         AVG(CASE WHEN delivery_date >= CAST($2 AS DATE) THEN dwell_minutes END) AS recent_dwell_min,
+         SUM(CASE WHEN delivery_date >= CAST($2 AS DATE) THEN 1 ELSE 0 END) AS recent_stops
+  FROM tms.v_stop_service
+  WHERE delivery_date >= CAST($1 AS DATE)
+  GROUP BY customer_name
+  ORDER BY AVG(CASE WHEN delivery_date >= CAST($2 AS DATE) THEN dwell_minutes END)
+         - AVG(CASE WHEN delivery_date < CAST($2 AS DATE) THEN dwell_minutes END) DESC
+parameters:
+  - name: baseline_start
+    type: string
+    description: ISO date where the baseline window starts.
+  - name: recent_start
+    type: string
+    description: ISO date where the recent window starts.
+annotations:
+  readOnlyHint: true
+
+---
+
+kind: tool
+name: geofence_misses
+type: postgres-sql
+source: tms-alloydb
+description: >
+  Locations where tracked trucks had to key arrivals manually because the geofence never fired,
+  with geocode quality. A high miss rate usually means wrong coordinates.
+statement: |
+  SELECT loc.location_id, loc.location_name, loc.geocode_quality, loc.latitude, loc.longitude,
+         COUNT(*) AS tracked_arrivals,
+         SUM(CASE WHEN s.arrival_source = 'DRIVER_MANUAL' THEN 1 ELSE 0 END) AS manual_arrivals
+  FROM tms.stops s JOIN tms.locations loc ON loc.location_id = s.location_id
+  WHERE s.arrival_source IN ('GEOFENCE', 'DRIVER_MANUAL') AND s.delivery_date >= CAST($1 AS DATE)
+  GROUP BY loc.location_id, loc.location_name, loc.geocode_quality, loc.latitude, loc.longitude
+  HAVING SUM(CASE WHEN s.arrival_source = 'DRIVER_MANUAL' THEN 1 ELSE 0 END) >= 0.5 * COUNT(*)
+  ORDER BY manual_arrivals DESC LIMIT 25
+parameters:
+  - name: since_date
+    type: string
+    description: ISO date, e.g. 2026-09-30.
+annotations:
+  readOnlyHint: true
+
+---
+
+kind: tool
+name: open_exceptions
+type: postgres-sql
+source: tms-alloydb
+description: Unresolved HIGH and CRITICAL exceptions with load and carrier.
+statement: |
+  SELECT e.exception_id, e.exception_type, e.severity, e.event_ts, e.description, l.load_id, l.carrier_id
+  FROM tms.exceptions e JOIN tms.loads l ON l.load_id = e.load_id
+  WHERE e.resolved_flag = FALSE AND e.severity IN ('HIGH', 'CRITICAL')
+  ORDER BY e.event_ts DESC LIMIT 50
+annotations:
+  readOnlyHint: true
+
+---
+
+kind: tool
+name: invoices_above_contract
+type: postgres-sql
+source: tms-alloydb
+description: Carrier invoices whose billed rate per mile exceeds the lane contract rate by more than 1%.
+statement: |
+  SELECT ci.carrier_invoice_id, ci.carrier_id, l.origin_dc_id || '->' || l.dest_region_state AS lane,
+         ci.billed_rate_per_mile, r.rate_per_mile AS contract_rate
+  FROM tms.carrier_invoices ci JOIN tms.loads l ON l.load_id = ci.load_id
+  JOIN tms.carrier_rates r ON r.carrier_id = ci.carrier_id AND r.origin_dc_id = l.origin_dc_id
+   AND r.dest_state = l.dest_region_state AND r.equipment_type = l.equipment_type
+  WHERE ci.billed_rate_per_mile > r.rate_per_mile * 1.01
+  ORDER BY ci.billed_rate_per_mile - r.rate_per_mile DESC LIMIT 50
+annotations:
+  readOnlyHint: true
+
+---
+
+kind: tool
+name: carrier_scorecard_bq
+type: bigquery-sql
+source: tms-bigquery
+description: On-time %, average lateness and claims rate per carrier (all time), from BigQuery.
+statement: |
+  SELECT carrier_id, carrier_name, carrier_type, safety_rating, loads, on_time_pct, avg_minutes_late, claims_case_rate
+  FROM `${GOOGLE_CLOUD_PROJECT}.mclane_tms.v_carrier_scorecard` ORDER BY on_time_pct
+annotations:
+  readOnlyHint: true
+
+---
+
+kind: tool
+name: lane_profitability_bq
+type: bigquery-sql
+source: tms-bigquery
+description: Margin and empty-mile % per lane (origin DC -> destination state) since a date, from BigQuery.
+statement: |
+  SELECT lane, COUNT(*) AS loads, SUM(margin) AS margin,
+         SAFE_DIVIDE(SUM(margin), SUM(total_revenue)) AS margin_pct,
+         SAFE_DIVIDE(SUM(empty_miles), SUM(total_miles)) AS empty_mile_pct
+  FROM `${GOOGLE_CLOUD_PROJECT}.mclane_tms.v_load_profitability`
+  WHERE load_date >= DATE(@since_date)
+  GROUP BY lane ORDER BY margin_pct
+parameters:
+  - name: since_date
+    type: string
+    description: ISO date, e.g. 2026-09-27.
+annotations:
+  readOnlyHint: true

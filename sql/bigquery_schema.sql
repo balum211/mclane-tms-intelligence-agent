@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS `YOUR_PROJECT.mclane_tms.locations` (
   dock_close_hour INT64 OPTIONS(description='Receiving window close hour (0-23, local).'),
   avg_unload_minutes INT64 OPTIONS(description='Typical unload time in minutes.'),
   requires_liftgate BOOL OPTIONS(description='Delivery needs a liftgate / small-format trailer.'),
+  geocode_quality STRING OPTIONS(description='ROOFTOP | STREET | ZIP_CENTROID. ZIP_CENTROID coordinates are approximate and break geofences.'),
+  geofence_radius_m INT64 OPTIONS(description='Radius in meters of the circular geofence used for automatic arrive / depart.'),
   padd_region STRING OPTIONS(description='DOE fuel region (PADD1..PADD5) used for fuel surcharge.')
 )
 OPTIONS(description='Every physical place: distribution centers (DC), stores, restaurants, vendors and terminals. TMW: company (shipper / consignee / terminal rows)');
@@ -118,7 +120,10 @@ CREATE TABLE IF NOT EXISTS `YOUR_PROJECT.mclane_tms.loads` (
   stop_count INT64 OPTIONS(description='Number of delivery stops.'),
   loaded_miles FLOAT64 OPTIONS(description='Miles driven with freight.'),
   empty_miles FLOAT64 OPTIONS(description='Deadhead / return miles.'),
-  total_miles FLOAT64 OPTIONS(description='loaded_miles + empty_miles.'),
+  total_miles FLOAT64 OPTIONS(description='loaded_miles + empty_miles. Planned route miles from PC*MILER (practical route).'),
+  mileage_source STRING OPTIONS(description='Where planned miles came from: PCMILER_PRACTICAL (TMW PC*MILER interface) or MANUAL.'),
+  pcmiler_shortest_miles FLOAT64 OPTIONS(description='PC*MILER shortest-route miles for the same stop sequence (lower bound, used in rate disputes).'),
+  actual_odometer_miles FLOAT64 OPTIONS(description='ELD / odometer miles actually driven (private fleet only, NULL for carriers or loads not completed).'),
   dest_region_state STRING OPTIONS(description='State of the final stop, used to define lanes (origin DC -> state).'),
   load_status STRING OPTIONS(description='PLANNED | DISPATCHED | IN_TRANSIT | COMPLETED | CANCELLED.'),
   total_revenue NUMERIC OPTIONS(description='Sum of revenue of orders on the load USD.'),
@@ -141,6 +146,9 @@ CREATE TABLE IF NOT EXISTS `YOUR_PROJECT.mclane_tms.stops` (
   departure_ts TIMESTAMP OPTIONS(description='Actual departure.'),
   on_time_flag BOOL OPTIONS(description='TRUE when arrival <= appt_window_end_ts.'),
   minutes_late INT64 OPTIONS(description='Minutes after window end (0 if on time).'),
+  minutes_early INT64 OPTIONS(description='Minutes before window start (0 if not early). Restaurants count arrivals more than 15 min early as an OTD miss.'),
+  arrival_source STRING OPTIONS(description='How arrival was recorded: GEOFENCE (automatic) | DRIVER_MANUAL (keyed on the ELD) | CARRIER_EDI214.'),
+  pcmiler_leg_miles FLOAT64 OPTIONS(description='PC*MILER practical miles from the previous stop (or the DC) to this stop.'),
   dwell_minutes INT64 OPTIONS(description='Minutes from arrival to departure.'),
   detention_minutes INT64 OPTIONS(description='Billable wait beyond the 2 hour free time.'),
   cases_delivered INT64 OPTIONS(description='Cases delivered.'),
@@ -249,6 +257,22 @@ PARTITION BY DATE(event_ts)
 CLUSTER BY load_id
 OPTIONS(description='Telematics / ELD pings for loads, including reefer temperature and ETA. TMW: checkcall');
 
+CREATE TABLE IF NOT EXISTS `YOUR_PROJECT.mclane_tms.geofence_events` (
+  geofence_event_id STRING NOT NULL OPTIONS(description='Event id.'),
+  load_id STRING OPTIONS(description='Load.'),
+  stop_id STRING OPTIONS(description='Stop the event was matched to.'),
+  location_id STRING OPTIONS(description='Location whose geofence was crossed.'),
+  event_type STRING OPTIONS(description='ENTER | EXIT.'),
+  event_ts TIMESTAMP OPTIONS(description='When the truck crossed the geofence.'),
+  event_date DATE OPTIONS(description='Date of the event.'),
+  latitude FLOAT64 OPTIONS(description='Truck latitude at the event.'),
+  longitude FLOAT64 OPTIONS(description='Truck longitude at the event.'),
+  distance_from_location_m INT64 OPTIONS(description='Distance from the stored location coordinates in meters.')
+)
+PARTITION BY event_date
+CLUSTER BY location_id, load_id
+OPTIONS(description='Automatic ENTER / EXIT events when a tracked truck crosses a location geofence. Missing events at a stop usually mean a bad geocode. TMW: checkcall (geofence arrive / depart auto-status from the telematics provider)');
+
 CREATE TABLE IF NOT EXISTS `YOUR_PROJECT.mclane_tms.exceptions` (
   exception_id STRING NOT NULL OPTIONS(description='Exception id.'),
   load_id STRING OPTIONS(description='Load.'),
@@ -305,8 +329,12 @@ WHERE l.load_status = 'COMPLETED';
 CREATE OR REPLACE VIEW `YOUR_PROJECT.mclane_tms.v_stop_service` AS
 SELECT s.stop_id, s.load_id, s.order_id, s.delivery_date, s.location_id, loc.location_name,
        loc.customer_id, cu.customer_name, cu.segment, cu.business_unit, l.origin_dc_id, l.carrier_id,
-       s.on_time_flag, s.minutes_late, s.dwell_minutes, s.detention_minutes,
-       s.cases_delivered, s.cases_short, s.cases_damaged, s.refused_flag
+       s.on_time_flag, s.minutes_late, s.minutes_early, s.dwell_minutes, s.detention_minutes,
+       s.cases_delivered, s.cases_short, s.cases_damaged, s.refused_flag, s.arrival_source, s.pcmiler_leg_miles,
+       CASE WHEN cu.business_unit = 'FOODSERVICE' THEN 'RESTAURANT' ELSE 'RETAIL' END AS otd_channel,
+       CASE WHEN s.minutes_late > 0 THEN FALSE
+            WHEN cu.business_unit = 'FOODSERVICE' AND s.minutes_early > 15 THEN FALSE
+            ELSE TRUE END AS otd_flag
 FROM `YOUR_PROJECT.mclane_tms.stops` s
 JOIN `YOUR_PROJECT.mclane_tms.loads` l ON l.load_id = s.load_id
 JOIN `YOUR_PROJECT.mclane_tms.locations` loc ON loc.location_id = s.location_id

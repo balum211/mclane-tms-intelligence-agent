@@ -30,7 +30,7 @@ def pg_backend(tms_duckdb):
 
 
 def test_all_tools_on_postgres(pg_backend):
-    from tests.test_tools import CALLS
+    from test_tools import CALLS
 
     failures = [(fn.__name__, kw, out.get("error_message")) for fn, kw in CALLS
                 if (out := fn(**kw))["status"] != "success"]

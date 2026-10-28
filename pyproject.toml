@@ -5,11 +5,13 @@ description = "TMS Intelligence: Google ADK multi-agent system over Trimble TMW-
 requires-python = ">=3.11"
 dependencies = [
   "google-adk>=2.0",
+  "google-genai>=1.0",
   "google-cloud-bigquery>=3.25",
   "psycopg[binary]>=3.2",
   "psycopg-pool>=3.2",
   "duckdb>=1.1",
   "python-dotenv>=1.0",
+  "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
@@ -17,8 +19,16 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23", "reportlab>=4.0"]
 deploy = ["google-cloud-aiplatform[agent_engines,adk]>=1.100"]
 toolbox = ["toolbox-core>=0.3"]
 
+# `uv sync` installs the dev group by default (codelab workflow); `pip install -e ".[dev]"` uses the extra.
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "reportlab>=4.0"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools]
-packages = ["tms_agent", "tms_agent.tools", "tms_data"]
+packages = ["tms_agent", "tms_agent.tools", "tms_data"]  # tms_data is a namespace package (no __init__.py, so adk web lists only tms_agent)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

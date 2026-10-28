@@ -12,5 +12,14 @@ Vendored, unmodified:
 - `.specify/templates/*.md`
 - `.specify/scripts/bash/*.sh`
 
+Vendored with changes (frontmatter `name` / `description` added so Antigravity loads them; the
+Toolbox skill gained a section on AlloyDB and BigQuery sources):
+- `.agents/skills/repo-research/SKILL.md`
+- `.agents/skills/mcp-toolbox-postgres/SKILL.md`
+
+Adapted from the starter: `server.py`, the `.env.example` layout, `tools.yaml` format and
+`antigravity/mcp_config.example.json`.
+
 Written for this project: `.specify/memory/constitution.md`, `specs/001-tms-intelligence/*`,
-`.agents/rules/*`, `.agents/skills/*`.
+`specs/002-mclane-delivery-signals/*`, `.agents/rules/*` (in the starter's project-context format),
+and the other `.agents/skills/*`.

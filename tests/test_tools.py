@@ -2,7 +2,7 @@
 
 import pytest
 
-from tms_agent.tools import analytics, audit, carrier, cost, exceptions, fleet, insights, kpi, predict
+from tms_agent.tools import analytics, audit, carrier, cost, delivery, exceptions, fleet, insights, kpi, miles, predict
 
 CALLS = [
     (exceptions.get_open_exceptions, {"min_severity": "LOW"}),
@@ -33,6 +33,14 @@ CALLS = [
     (insights.get_spot_vs_contract_premium, {"days": 30}),
     (insights.get_weekly_insights_pack, {}),
     (analytics.get_tms_schema, {"table_names": ["loads"]}),
+    *[(delivery.get_otd_scorecard, {"days": 28, "group_by": g}) for g in ["channel", "dc", "customer", "carrier", "week"]],
+    (delivery.get_otd_scorecard, {"days": 28, "group_by": "dc", "channel": "RESTAURANT"}),
+    *[(delivery.get_dwell_time_changes, {"group_by": g, "min_stops": 5, "min_change_minutes": 0})
+      for g in ["customer", "location", "dc", "channel"]],
+    (delivery.get_geofence_compliance, {"days": 30}),
+    (delivery.get_geofence_compliance, {"days": 30, "dc_id": "DC04"}),
+    (miles.get_out_of_route_miles, {"days": 60, "group_by": "driver"}),
+    (miles.get_out_of_route_miles, {"days": 60, "group_by": "dc"}),
 ]
 
 

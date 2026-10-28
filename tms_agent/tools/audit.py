@@ -1,7 +1,7 @@
 """Freight invoice audit: carrier freight bills vs contracted rates, accessorial rules and evidence.
 
 Rules (deterministic, explainable):
-  MILES_INFLATED         billed miles > TMS planned miles + 2%
+  MILES_INFLATED         billed miles > PC*MILER practical miles planned in TMW + 2%
   RATE_ABOVE_CONTRACT    billed rate per mile > contract rate + 1%
   LINEHAUL_MISMATCH      billed linehaul above contract linehaul for another reason
   FUEL_ABOVE_TABLE       fuel surcharge > (DOE price for the load week - base) / mpg * miles + 3%
@@ -85,7 +85,7 @@ def audit_invoice_row(r: dict) -> dict:
         if over > TOL_USD:
             if _f(r.get("billed_miles")) > miles * 1.02:
                 code = "MILES_INFLATED"
-                ev = f"billed {r['billed_miles']} mi vs {miles} mi planned in TMS"
+                ev = f"billed {r['billed_miles']} mi vs {miles} mi PC*MILER practical (TMS planned)"
             elif r.get("billed_rate_per_mile") is not None and _f(r["billed_rate_per_mile"]) > rate * 1.01:
                 code = "RATE_ABOVE_CONTRACT"
                 ev = f"billed ${_f(r['billed_rate_per_mile']):.3f}/mi vs contract ${rate:.3f}/mi ({r['rate_id']})"
@@ -98,7 +98,7 @@ def audit_invoice_row(r: dict) -> dict:
         if _f(r.get("billed_miles")) > miles * 1.02 and r.get("billed_rate_per_mile") is not None:
             findings.append({"code": "MILES_INFLATED",
                              "overbilled_usd": round((_f(r["billed_miles"]) - miles) * _f(r["billed_rate_per_mile"]), 2),
-                             "evidence": f"billed {r['billed_miles']} mi vs {miles} mi planned in TMS"})
+                             "evidence": f"billed {r['billed_miles']} mi vs {miles} mi PC*MILER practical (TMS planned)"})
     diesel = r.get("diesel_price_per_gal")
     if diesel is None:
         review.append("NO_FUEL_INDEX: DOE price missing for the load week.")

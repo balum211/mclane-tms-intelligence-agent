@@ -13,7 +13,30 @@ How to use this file:
   list and implementation plan to review before it writes files. Use **Fast** mode for questions.
 - Review each artifact (plan, task list, walkthrough) and comment on it before you accept it.
 - Track A uses the finished code in this repo (fastest path to a demo). Track B rebuilds it
-  spec-first from an empty folder with spec-kit, which is what the judges want to see.
+  spec-first from an empty folder with spec-kit, which is what the judges want to see. Track C adds
+  the McLane delivery signals (PC*MILER, dwell time change, Retail / Restaurant OTD, geofences and geo
+  locations) spec-first, the way `specs/002-mclane-delivery-signals/` was built.
+- Commands follow the codelab starter: `uv sync`, `uv run adk web .`, `uv run python server.py`.
+- If you work in your own clone of the codelab starter (your sdd-adk-agents-agy project) instead of
+  this repo, run A0b first.
+
+### A0. One-time MCP setup (ADK docs server from the spec-kit codelab)
+
+Merge `antigravity/mcp_config.example.json` into `$HOME/.gemini/config/mcp_config.json` (Agent
+Manager → MCP servers → Manage → View raw config), then refresh. It needs `uv` on your PATH. The
+agent can then look up ADK APIs in `https://adk.dev/llms.txt` instead of guessing.
+
+### A0b. Bring this agent into your sdd-adk-agents-agy project
+
+```text
+Run scripts/install_into_sdd_starter.sh <path to my sdd-adk-agents-agy clone> from this repo. Then,
+in that project, run the uv add commands it prints, uv sync, and uv run pytest -q. Review
+AGENTS.tms.md and tools.tms.yaml it wrote, and merge them into AGENTS.md / tools.yaml with my
+approval. Do not overwrite the starter's existing skills or rules.
+```
+
+Then in that workspace: "Use the repo-research skill to update .agents/rules/project-context.md
+for the TMS agent now in this repository." (The installer backs up the old file first.)
 
 ---
 
@@ -23,7 +46,8 @@ How to use this file:
 
 ```text
 Read AGENTS.md, .agents/rules/project-context.md, .specify/memory/constitution.md and
-specs/001-tms-intelligence/spec.md. Then give me a one-page summary of: the 5 capabilities, the
+specs/001-tms-intelligence/spec.md and specs/002-mclane-delivery-signals/spec.md. Then give me a
+one-page summary of: the 5 capabilities plus the McLane delivery signals, the
 ADK agent tree in tms_agent/agent.py, the data backends, and the guardrails. List the assumptions
 and open questions from docs/SOLUTION_DESIGN.md section 0. Do not change any files.
 ```
@@ -31,9 +55,9 @@ and open questions from docs/SOLUTION_DESIGN.md section 0. Do not change any fil
 ### A2. Set up and prove it works locally
 
 ```text
-Create a Python 3.11+ virtual env in .venv, run pip install -e ".[dev]", then
-python -m tms_data.generate and python -m tms_data.load --target duckdb. Run pytest -q and
-python evals/run_offline_evals.py. Report the test count, audit precision/recall and delay AUC/lift.
+Run uv sync, then uv run python -m tms_data.generate and
+uv run python -m tms_data.load --target duckdb. Run uv run pytest -q and
+uv run python evals/run_offline_evals.py. Report the test count, audit precision/recall and delay AUC/lift.
 If anything fails, show the error and propose a fix before changing code.
 ```
 
@@ -49,13 +73,22 @@ Use the freight-invoice-audit skill: summarize carrier overbilling for the last 
 carrier, then explain invoice CINV0000069 with the contract evidence.
 ```
 
+```text
+Use the mclane-delivery-signals skill: compare Retail vs Restaurant OTD for the last 28 days by DC,
+show where dwell time changed in the last 21 days vs the prior 8 weeks, list locations whose
+geofence arrivals are mostly manual with a suggested geocode fix, and rank DC08 drivers by
+out-of-route miles against PC*MILER practical miles. Say which miles are PC*MILER and which are
+estimates.
+```
+
 ### A4. Run the agent with the ADK web UI
 
 ```text
-Copy tms_agent/.env.example to tms_agent/.env. Set GOOGLE_GENAI_USE_ENTERPRISE=1,
-GOOGLE_CLOUD_PROJECT=<my project>, GOOGLE_CLOUD_LOCATION=us-central1, TMS_DB_BACKEND=duckdb.
-Start `adk web .` in a terminal and open http://localhost:8000 in the browser agent. Select
-tms_agent and ask: "Give me this morning's TMS brief." Take a screenshot of the answer and add it to
+Copy .env.example to .env and tms_agent/.env.example to tms_agent/.env. Keep
+GOOGLE_GENAI_USE_ENTERPRISE=True and GOOGLE_CLOUD_LOCATION=global, set GOOGLE_CLOUD_PROJECT=<my project>
+and TMS_DB_BACKEND=duckdb. Start `uv run adk web .` in a terminal and open http://localhost:8000 in the browser agent. Select
+tms_agent and ask: "Give me this morning's TMS brief." Then ask "How is Retail vs Restaurant
+on-time delivery, and where did dwell time change?" Take a screenshot of the answer and add it to
 the walkthrough.
 ```
 
@@ -73,7 +106,7 @@ artifact with screenshots.
 
 ```text
 Use the tms-synthetic-data skill to load the dataset into BigQuery project <my project>, dataset
-mclane_tms (python -m tms_data.load --target bigquery ...). Then switch tms_agent/.env to
+mclane_tms (uv run python -m tms_data.load --target bigquery ...). Then switch tms_agent/.env to
 TMS_DB_BACKEND=bigquery with TMS_BQ_PROJECT and TMS_BQ_DATASET, and re-run the A4 brief question.
 Also run sql/bigquery_ml_delay_model.sql with bq and report the model's ROC AUC.
 ```
@@ -83,7 +116,15 @@ AlloyDB variant:
 ```text
 Use the tms-synthetic-data skill to load AlloyDB through the auth proxy at 127.0.0.1:5432, create a
 read-only tms_reader role as described in docs/DEPLOYMENT.md, set TMS_DB_BACKEND=alloydb and
-TMS_ALLOYDB_DSN for tms_reader, then run TMS_TEST_PG_DSN=<dsn> pytest tests/test_postgres.py.
+TMS_ALLOYDB_DSN for tms_reader, then run TMS_TEST_PG_DSN=<dsn> uv run pytest tests/test_postgres.py.
+```
+
+MCP Toolbox variant (from the spec-kit codelab):
+
+```text
+Use the mcp-toolbox-postgres skill. Start MCP Toolbox for Databases with the tools.yaml in this repo
+(set ALLOYDB_PASSWORD and REGION in .env), list the tools it serves, and call otd_by_channel and
+dwell_by_customer for the last 28 days. Compare the results with the get_otd_scorecard tool.
 ```
 
 ### A7. Deploy and publish
@@ -111,7 +152,7 @@ with the prompts from Track B (B4 to B8), and tell it to follow the `adk-tool-au
 
 ## Track B: rebuild it spec-driven from an empty folder
 
-Start in an empty workspace folder. Copy `.agents/workflows/`, `.specify/templates/`,
+Start in an empty workspace folder, or a fresh clone of the codelab starter. Copy `.agents/workflows/`, `.specify/templates/`,
 `.specify/scripts/` and `.agents/skills/` from this repo (or from the
 `alphinside/sdd-adk-antigravity-starter` template used in the codelab). Each step below is one prompt.
 
@@ -255,6 +296,66 @@ Then write a 5-minute docs/DEMO_SCRIPT.md.
 ```
 
 Then deploy with A7.
+
+---
+
+## Track C: add the McLane delivery signals spec-first
+
+Use this on top of a working Track A or B workspace. It produces `specs/002-*` and the code in
+`tms_agent/tools/delivery.py`, `tms_agent/tools/miles.py` and `tms_agent/mileage.py`.
+
+### C1. Specify
+
+```text
+/speckit.specify Add McLane delivery signals to the TMS Intelligence agent:
+(1) Retail vs Restaurant on-time delivery: Retail (grocery / convenience) is on time when it arrives
+no later than the window end; Restaurant (foodservice) also must not arrive more than 15 minutes
+before the window start. Scorecard by channel, DC, customer, carrier and week vs customer targets.
+(2) Dwell time change: recent window vs baseline per customer, location, DC and channel, with the
+annualized truck-hour cost of the change.
+(3) Geofences and geo locations: where arrivals come from (geofence, driver manual, carrier EDI 214),
+which locations have bad geocodes (ZIP centroid) and a suggested corrected point from ELD pings;
+live load tracking with ETA to the next stop.
+(4) PC*MILER miles: TMW plans with PC*MILER practical miles; compare carrier billed miles and private
+fleet odometer miles (out-of-route) against them, and call PC*MILER Web Services when an API key
+is configured. Estimates are always labelled, never shown as PC*MILER miles.
+```
+
+### C2. Clarify, plan, tasks
+
+```text
+/speckit.clarify
+```
+
+Suggested answers: restaurant early grace 15 minutes; dwell recent 21 days vs 56-day baseline,
+minimum 20 stops; truck-hour cost $85; out-of-route flag above 8%; billed miles more than 2% over
+PC*MILER practical = MILES_INFLATED; PC*MILER key comes from PCMILER_API_KEY.
+
+```text
+/speckit.plan Add columns in tms_agent/schema.py (stops.minutes_early, arrival_source,
+pcmiler_leg_miles; loads.pcmiler_shortest_miles, actual_odometer_miles, mileage_source;
+locations.geocode_quality, geofence_radius_m), a geofence_events table, otd_channel / otd_flag in
+v_stop_service. Generate the new signals in a post-pass of tms_data/generate.py with a separate
+random stream so existing stories keep their shape. New delivery_performance_analyst agent;
+PC*MILER client in tms_agent/mileage.py using only the standard library.
+```
+
+```text
+/speckit.tasks
+```
+
+### C3. Implement and verify
+
+```text
+/speckit.implement Follow the adk-tool-author skill. Plant: restaurant early arrivals at DC07, a
+dwell increase at one grocery customer and a decrease at one restaurant chain, ~6% ZIP-centroid
+geocodes, and four DC08 drivers with ~13% out-of-route miles. Add tests in
+tests/test_mclane_signals.py for each, plus a test that mocks the PC*MILER HTTP call. Then create a
+mclane-delivery-signals skill with a scripts/signals.py CLI. Run uv run pytest -q.
+```
+
+Use `/plan` style review (Planning mode) before C3, and the browser agent to run the C1 questions in
+`uv run adk web .` afterwards.
 
 ---
 

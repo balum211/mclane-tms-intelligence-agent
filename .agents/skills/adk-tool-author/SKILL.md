@@ -27,8 +27,8 @@ description: Add or change a Google ADK function tool or sub-agent in the tms_ag
 7. Register it: add it to the specialist's `tools=[...]` in `tms_agent/agent.py` and mention it in
    that agent's instruction in `prompts.py`.
 8. Test it: add a call to `CALLS` in `tests/test_tools.py` (runs on DuckDB), and an assertion in
-   `tests/test_capabilities.py` if it backs a demo story. Run `pytest -q`. If you have PostgreSQL,
-   also `TMS_TEST_PG_DSN=postgresql://... pytest tests/test_postgres.py`.
+   `tests/test_capabilities.py` if it backs a demo story. Run `uv run pytest -q`. If you have PostgreSQL,
+   also `TMS_TEST_PG_DSN=postgresql://... uv run pytest tests/test_postgres.py`.
 
 ## Adding a specialist agent
 

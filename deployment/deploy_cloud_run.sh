@@ -9,7 +9,8 @@ adk deploy cloud_run \
   --service_name tms-intelligence --app_name tms_agent --with_ui \
   --env TMS_DB_BACKEND="${TMS_DB_BACKEND:-bigquery}" \
   --env TMS_BQ_PROJECT="$PROJECT_ID" --env TMS_BQ_DATASET="${DATASET:-mclane_tms}" \
-  --env GOOGLE_GENAI_USE_ENTERPRISE=1 --env GOOGLE_CLOUD_PROJECT="$PROJECT_ID" --env GOOGLE_CLOUD_LOCATION="$REGION" \
+  --env GOOGLE_GENAI_USE_ENTERPRISE=True --env GOOGLE_GENAI_USE_VERTEXAI=True --env GOOGLE_CLOUD_PROJECT="$PROJECT_ID" \
+  --env GOOGLE_CLOUD_LOCATION="${GEMINI_LOCATION:-global}" \
   tms_agent
 # For AlloyDB add: --env TMS_DB_BACKEND=alloydb --env TMS_ALLOYDB_DSN=... and attach a Serverless VPC connector:
 #   gcloud run services update tms-intelligence --region $REGION --vpc-connector <connector> --vpc-egress private-ranges-only
